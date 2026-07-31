@@ -13,3 +13,6 @@ ui/node_modules/
 ui/dist/
 src-tauri/target/
 engine/node_modules/
+
+logs/
+agent-prompts-tmp/
