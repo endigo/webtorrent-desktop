@@ -6,6 +6,7 @@
 mod commands;
 mod dialogs;
 mod dispatch;
+mod engine;
 mod menu;
 mod prefs;
 mod tray;
@@ -66,12 +67,35 @@ pub fn run() {
             commands::prefs_set,
             commands::prefs_merge,
             commands::prefs_path,
+            engine::torrent_add,
+            engine::torrent_remove,
+            engine::torrent_create,
+            engine::torrent_select_files,
+            engine::stream_start,
+            engine::stream_stop,
+            engine::engine_ping,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
 
             // Prefs must load after the path resolver is ready.
             handle.manage(prefs::Prefs::load(&handle));
+
+            // WebTorrent Node sidecar (lazy-spawn on first command; pre-resolve path).
+            let engine_dir = engine::resolve_engine_dir(&handle);
+            handle.manage(engine::Engine::new(engine_dir.clone()));
+            if engine_dir.join("index.js").is_file() {
+                if let Some(eng) = handle.try_state::<engine::Engine>() {
+                    if let Err(err) = engine::ensure_started(&handle, eng.inner()) {
+                        eprintln!("engine warm-start skipped: {err}");
+                    }
+                }
+            } else {
+                eprintln!(
+                    "engine not found at {} — torrent commands will fail until engine/ is installed",
+                    engine_dir.display()
+                );
+            }
 
             menu::init(&handle)?;
             if let Err(err) = tray::init(&handle) {

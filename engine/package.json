@@ -2,11 +2,14 @@
   "name": "webtorrent-engine",
   "version": "0.1.0",
   "private": true,
-  "type": "module",
+  "description": "WebTorrent JSON-lines sidecar for WebTorrent Desktop (Tauri)",
   "main": "index.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
-    "webtorrent": "^2.5.1",
-    "parse-torrent": "^11.0.17",
-    "create-torrent": "^6.0.17"
+    "network-address": "^1.1.2",
+    "webtorrent": "1.9.7"
   }
 }

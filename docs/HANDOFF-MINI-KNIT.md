@@ -11,8 +11,8 @@
 |------|--------|
 | Scaffold Tauri 2 + React UI | done |
 | W1b Frontend shell | **done** (14afe24, report ui/REPORT-W1b.md) |
-| W1a Rust shell | **IN PROGRESS** — modules prefs/window/dispatch added; lib.rs wiring incomplete |
-| W2 Engine sidecar | not started (needs W1a) |
+| W1a Rust shell | **done** (REPORT-W1a.md) |
+| W2 Engine sidecar | **done** (REPORT-W2.md) |
 | W3–W5 | not started |
 
 ## Latest commits
