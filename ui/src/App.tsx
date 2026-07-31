@@ -5,10 +5,13 @@ import { PlayerPage } from "./pages/PlayerPage";
 import { PreferencesPage } from "./pages/PreferencesPage";
 import { TorrentListPage } from "./pages/TorrentListPage";
 import {
+  onAppReady,
   onDispatch,
+  onFileDrop,
   onTorrentDone,
   onTorrentMetadata,
   onTorrentProgress,
+  setWindowTitle,
 } from "./lib/tauri";
 import { useAppStore } from "./store/useAppStore";
 import "./styles/global.css";
@@ -46,6 +49,23 @@ function StatusBar() {
   );
 }
 
+function classifyDroppedPaths(paths: string[]): {
+  torrents: string[];
+  seeds: string[];
+} {
+  const torrents: string[] = [];
+  const seeds: string[] = [];
+  for (const p of paths) {
+    const lower = p.toLowerCase();
+    if (lower.endsWith(".torrent") || lower.startsWith("magnet:")) {
+      torrents.push(p);
+    } else {
+      seeds.push(p);
+    }
+  }
+  return { torrents, seeds };
+}
+
 /** Boot: prefs + engine list + shell/engine event subscriptions. */
 function useShellBridge() {
   const loadPrefs = useAppStore((s) => s.loadPrefs);
@@ -53,6 +73,10 @@ function useShellBridge() {
   const handleDispatch = useAppStore((s) => s.handleDispatch);
   const applyProgressEvent = useAppStore((s) => s.applyProgressEvent);
   const setStatusMessage = useAppStore((s) => s.setStatusMessage);
+  const handleAddMagnet = useAppStore((s) => s.handleAddMagnet);
+  const setCreateTorrentPaths = useAppStore((s) => s.setCreateTorrentPaths);
+  const navigate = useAppStore((s) => s.navigate);
+  const windowTitle = useAppStore((s) => s.windowTitle);
 
   useEffect(() => {
     void loadPrefs();
@@ -63,7 +87,23 @@ function useShellBridge() {
 
     void (async () => {
       const offs = await Promise.all([
+        onAppReady(() => {
+          void loadPrefs();
+          void refreshTorrents();
+          setStatusMessage("Shell ready");
+        }),
         onDispatch((action, args) => handleDispatch(action, args)),
+        onFileDrop((paths) => {
+          const { torrents, seeds } = classifyDroppedPaths(paths);
+          for (const t of torrents) {
+            void handleAddMagnet(t);
+          }
+          if (seeds.length > 0) {
+            setCreateTorrentPaths(seeds);
+            navigate("create-torrent");
+            setStatusMessage(`Create torrent from ${seeds.length} path(s)`);
+          }
+        }),
         onTorrentProgress((payload) => applyProgressEvent(payload)),
         onTorrentMetadata((payload) => {
           applyProgressEvent(payload);
@@ -92,6 +132,11 @@ function useShellBridge() {
     // Store actions are stable zustand refs; mount-once is intentional.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Keep native window title in sync with chrome title.
+  useEffect(() => {
+    void setWindowTitle(windowTitle);
+  }, [windowTitle]);
 }
 
 export default function App() {

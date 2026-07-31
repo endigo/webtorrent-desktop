@@ -79,7 +79,7 @@ export function PreferencesPage() {
             </button>
           </div>
           <p className="hint-muted" style={{ marginTop: 6 }}>
-            Uses <code>open_folder</code> / dialog plugin when available
+            Uses <code>open_directory</code> / dialog plugin when available
           </p>
         </div>
       </section>

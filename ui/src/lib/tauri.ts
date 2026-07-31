@@ -400,11 +400,53 @@ export async function streamStop(
 // ---------------------------------------------------------------------------
 
 export const EVENTS = {
+  ready: "app://ready",
   dispatch: "app://dispatch",
   progress: "torrent://progress",
   metadata: "torrent://metadata",
   done: "torrent://done",
 } as const;
+
+/**
+ * Listen for shell bootstrap completion (`app://ready` from lib.rs setup).
+ */
+export async function onAppReady(handler: () => void): Promise<UnlistenFn> {
+  if (!isTauriRuntime()) {
+    return () => {};
+  }
+  try {
+    return await listen(EVENTS.ready, () => handler());
+  } catch {
+    return () => {};
+  }
+}
+
+/**
+ * Native file drag-drop paths from the Tauri window (full filesystem paths).
+ * Returns an unsubscribe; no-ops outside Tauri.
+ */
+export async function onFileDrop(
+  handler: (paths: string[]) => void,
+): Promise<UnlistenFn> {
+  if (!isTauriRuntime()) {
+    return () => {};
+  }
+  try {
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    return await getCurrentWindow().onDragDropEvent((event) => {
+      if (event.payload.type === "drop" && Array.isArray(event.payload.paths)) {
+        handler(event.payload.paths.filter(Boolean));
+      }
+    });
+  } catch {
+    return () => {};
+  }
+}
+
+/** Sync the OS window title with the in-app chrome title. */
+export async function setWindowTitle(title: string): Promise<void> {
+  await tryInvokeAliases(["set_window_title", "setWindowTitle"], { title });
+}
 
 /**
  * Listen for shell → UI dispatch events from Rust.
