@@ -46,29 +46,37 @@ export interface AppPrefs {
   [key: string]: unknown;
 }
 
-/** Payload for torrent_add */
+/** Payload for torrent_add (matches engine/index.js + Rust bridge) */
 export interface TorrentAddArgs {
   /** Local .torrent path, magnet URI, or info-hash */
   id: string;
+  /** Client-assigned key (engine requires torrentKey) */
+  torrentKey?: number;
   /** Optional download path override */
   path?: string;
-  /** Optional file selection indices */
+  /** Optional per-file selection booleans (engine) */
+  selections?: boolean[];
+  /** Optional file selection indices (UI convenience) */
   fileIndices?: number[];
 }
 
-/** Payload for torrent_create */
+/** Payload for torrent_create (engine uses files[] + options) */
 export interface TorrentCreateArgs {
   paths: string[];
   name: string;
   comment?: string;
   private?: boolean;
   trackers?: string[];
+  torrentKey?: number;
 }
 
 /** Payload for torrent_select_files */
 export interface TorrentSelectFilesArgs {
-  infoHash: string;
-  fileIndices: number[];
+  infoHash?: string;
+  torrentKey?: number;
+  /** boolean[] selection mask (engine) or indices */
+  selections?: boolean[];
+  fileIndices?: number[];
 }
 
 /** Engine list item (flexible for W2 shape) */
@@ -317,82 +325,98 @@ export async function prefsMerge(
 export async function torrentAdd(
   args: TorrentAddArgs,
 ): Promise<InvokeResult<EngineTorrent | null>> {
-  return tryInvokeAliases<EngineTorrent | null>(
-    ["torrent_add", "torrentAdd", "add_torrent"],
-    {
-      id: args.id,
-      path: args.path,
-      fileIndices: args.fileIndices,
-      // snake_case aliases some Rust handlers prefer
-      file_indices: args.fileIndices,
-    },
-  );
+  // Rust engine.rs: torrent_add(torrent_key, torrent_id, path?, selections?)
+  return tryInvokeAliases<EngineTorrent | null>(["torrent_add"], {
+    torrent_key: args.torrentKey ?? Date.now(),
+    torrent_id: args.id,
+    path: args.path ?? null,
+    selections: args.selections ?? null,
+  });
 }
 
 export async function torrentRemove(
   infoHash: string,
-  deleteData = false,
+  _deleteData = false,
+  torrentKey?: number,
 ): Promise<InvokeResult<boolean | null>> {
-  return tryInvokeAliases<boolean | null>(
-    ["torrent_remove", "torrentRemove", "remove_torrent"],
-    { infoHash, info_hash: infoHash, deleteData, delete_data: deleteData },
-  );
+  // Rust: torrent_remove(info_hash?, torrent_key?)
+  return tryInvokeAliases<boolean | null>(["torrent_remove"], {
+    info_hash: infoHash,
+    torrent_key: torrentKey ?? null,
+  });
 }
 
 export async function torrentCreate(
   args: TorrentCreateArgs,
 ): Promise<InvokeResult<EngineTorrent | { path?: string } | null>> {
-  return tryInvokeAliases(["torrent_create", "torrentCreate", "create_torrent"], {
-    paths: args.paths,
+  // Rust: torrent_create(torrent_key, files, options?)
+  const options: Record<string, unknown> = {
     name: args.name,
-    comment: args.comment,
-    private: args.private,
-    trackers: args.trackers,
+  };
+  if (args.comment) options.comment = args.comment;
+  if (args.private != null) options.private = args.private;
+  if (args.trackers?.length) {
+    options.announceList = [args.trackers];
+    options.announce = args.trackers;
+  }
+  return tryInvokeAliases(["torrent_create"], {
+    torrent_key: args.torrentKey ?? Date.now(),
+    files: args.paths,
+    options,
   });
 }
 
 export async function torrentSelectFiles(
   args: TorrentSelectFilesArgs,
 ): Promise<InvokeResult<null>> {
-  return tryInvokeAliases(["torrent_select_files", "torrentSelectFiles"], {
-    infoHash: args.infoHash,
-    info_hash: args.infoHash,
-    fileIndices: args.fileIndices,
-    file_indices: args.fileIndices,
+  // Rust: torrent_select_files(info_hash?, torrent_key?, selections)
+  return tryInvokeAliases(["torrent_select_files"], {
+    info_hash: args.infoHash ?? null,
+    torrent_key: args.torrentKey ?? null,
+    selections: args.selections ?? [],
   });
 }
 
 export async function torrentList(): Promise<InvokeResult<EngineTorrent[]>> {
-  const result = await tryInvokeAliases<EngineTorrent[]>([
+  // Prefer engine_ping / future list; fall back to empty when unavailable.
+  const result = await tryInvokeAliases<EngineTorrent[] | { torrents?: EngineTorrent[] }>([
     "torrent_list",
-    "torrentList",
     "list_torrents",
   ]);
-  if (result.ok && !Array.isArray(result.value)) {
+  if (result.ok) {
+    const v = result.value;
+    if (Array.isArray(v)) return { ok: true, value: v };
+    if (v && typeof v === "object" && Array.isArray(v.torrents)) {
+      return { ok: true, value: v.torrents };
+    }
     return { ok: true, value: [] };
   }
-  return result;
+  return {
+    ok: false,
+    reason: result.reason,
+    message: result.message,
+  };
 }
 
 export async function streamStart(
   infoHash: string,
-  fileIndex = 0,
+  torrentKey?: number,
 ): Promise<InvokeResult<{ url?: string } | string | null>> {
-  return tryInvokeAliases(["stream_start", "streamStart", "start_server"], {
-    infoHash,
+  // Rust: stream_start(info_hash?, torrent_key?)
+  return tryInvokeAliases(["stream_start"], {
     info_hash: infoHash,
-    fileIndex,
-    file_index: fileIndex,
+    torrent_key: torrentKey ?? null,
   });
 }
 
-export async function streamStop(
-  infoHash?: string,
-): Promise<InvokeResult<null>> {
-  return tryInvokeAliases(["stream_stop", "streamStop", "stop_server"], {
-    infoHash,
-    info_hash: infoHash,
-  });
+export async function streamStop(): Promise<InvokeResult<null>> {
+  return tryInvokeAliases(["stream_stop"], {});
+}
+
+export async function enginePing(): Promise<
+  InvokeResult<{ pong?: boolean; torrents?: number }>
+> {
+  return tryInvokeAliases(["engine_ping"], {});
 }
 
 // ---------------------------------------------------------------------------

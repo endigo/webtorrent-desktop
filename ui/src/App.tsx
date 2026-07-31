@@ -106,15 +106,40 @@ function useShellBridge() {
         }),
         onTorrentProgress((payload) => applyProgressEvent(payload)),
         onTorrentMetadata((payload) => {
-          applyProgressEvent(payload);
-          if (typeof payload.name === "string") {
-            setStatusMessage(`Metadata: ${payload.name}`);
-          }
+          // Engine: { torrentKey, info: { name, infoHash, ... } }
+          const info =
+            payload.info && typeof payload.info === "object"
+              ? (payload.info as Record<string, unknown>)
+              : payload;
+          applyProgressEvent({
+            ...info,
+            torrentKey: payload.torrentKey ?? info.torrentKey,
+          });
+          const name =
+            typeof info.name === "string"
+              ? info.name
+              : typeof payload.name === "string"
+                ? payload.name
+                : null;
+          if (name) setStatusMessage(`Metadata: ${name}`);
         }),
         onTorrentDone((payload) => {
-          applyProgressEvent({ ...payload, progress: 1, status: "done" });
+          const info =
+            payload.info && typeof payload.info === "object"
+              ? (payload.info as Record<string, unknown>)
+              : payload;
+          applyProgressEvent({
+            ...info,
+            torrentKey: payload.torrentKey ?? info.torrentKey,
+            progress: 1,
+            status: "done",
+          });
           const name =
-            typeof payload.name === "string" ? payload.name : "Torrent";
+            typeof info.name === "string"
+              ? info.name
+              : typeof payload.name === "string"
+                ? payload.name
+                : "Torrent";
           setStatusMessage(`Finished: ${name}`);
         }),
       ]);

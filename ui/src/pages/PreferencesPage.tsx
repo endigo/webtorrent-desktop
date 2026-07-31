@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { openFolder } from "../lib/tauri";
+import { autostartIsEnabled, openFolder } from "../lib/tauri";
 import { useAppStore } from "../store/useAppStore";
 import type { AppPrefs } from "../types/prefs";
 
@@ -13,6 +13,7 @@ export function PreferencesPage() {
 
   const [draft, setDraft] = useState<AppPrefs>(prefs);
   const [saving, setSaving] = useState(false);
+  const [autostartHint, setAutostartHint] = useState<string | null>(null);
 
   useEffect(() => {
     if (!prefsLoaded) {
@@ -23,6 +24,23 @@ export function PreferencesPage() {
   useEffect(() => {
     setDraft(prefs);
   }, [prefs]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const result = await autostartIsEnabled();
+      if (cancelled) return;
+      if (result.ok) {
+        setDraft((d) => ({ ...d, startup: result.value }));
+        setAutostartHint(null);
+      } else if (result.reason === "unavailable") {
+        setAutostartHint("Autostart plugin not available in this runtime");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const patch = <K extends keyof AppPrefs>(key: K, value: AppPrefs[K]) => {
     setDraft((d) => ({ ...d, [key]: value }));
@@ -116,6 +134,11 @@ export function PreferencesPage() {
           />
           Open WebTorrent on startup
         </label>
+        {autostartHint && (
+          <p className="hint-muted" style={{ marginTop: 4 }}>
+            {autostartHint}
+          </p>
+        )}
         <label className="checkbox-row">
           <input
             type="checkbox"

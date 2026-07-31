@@ -29,16 +29,19 @@ Also registered on Rust: `show_item_in_folder`, `open_path`, `move_to_trash`,
 Prefs shape (UI defaults in `ui/src/types/prefs.ts`): `downloadPath`,
 `openExternalPlayer`, `startup`, `soundNotifications`, etc.
 
-## Engine (W2 / W3) — expected
+## Engine (W2 / W3) — `src-tauri/src/engine.rs`
 
-| UI helper | Primary command | Notes |
-|-----------|-----------------|-------|
-| `torrentAdd({ id })` | `torrent_add` | magnet / path / infohash |
-| `torrentRemove(hash)` | `torrent_remove` | optional `deleteData` |
-| `torrentCreate(opts)` | `torrent_create` | paths + metadata |
-| `torrentSelectFiles` | `torrent_select_files` | |
-| `torrentList()` | `torrent_list` | full list snapshot |
-| `streamStart` / `streamStop` | `stream_start` / `stream_stop` | M4 player |
+Tauri 2 passes **snake_case** arg names matching the Rust parameters:
+
+| UI helper | Command | Args |
+|-----------|---------|------|
+| `torrentAdd` | `torrent_add` | `torrent_key`, `torrent_id`, `path?`, `selections?` |
+| `torrentRemove` | `torrent_remove` | `info_hash?`, `torrent_key?` |
+| `torrentCreate` | `torrent_create` | `torrent_key`, `files`, `options?` |
+| `torrentSelectFiles` | `torrent_select_files` | `info_hash?`, `torrent_key?`, `selections` |
+| `streamStart` | `stream_start` | `info_hash?`, `torrent_key?` |
+| `streamStop` | `stream_stop` | — |
+| `enginePing` | `engine_ping` | — |
 
 ## Events
 

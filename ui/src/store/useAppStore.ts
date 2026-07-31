@@ -347,11 +347,21 @@ export const useAppStore = create<AppState>((set, get) => ({
       return;
     }
 
-    const result = await torrentAdd({ id });
+    const torrentKey = nextTorrentKey++;
+    const downloadPath = get().prefs.downloadPath;
+    const result = await torrentAdd({
+      id,
+      torrentKey,
+      path:
+        downloadPath && !downloadPath.startsWith("~/")
+          ? downloadPath
+          : undefined,
+    });
     if (result.ok) {
       const summary = result.value
         ? engineTorrentToSummary(result.value)
         : engineTorrentToSummary({
+            torrentKey,
             infoHash: id.startsWith("magnet:")
               ? id.slice(0, 48)
               : id.slice(0, 40),
@@ -359,6 +369,10 @@ export const useAppStore = create<AppState>((set, get) => ({
               ? "Magnet torrent"
               : id.split(/[/\\]/).pop() || id,
           });
+      // Prefer our assigned key if engine didn't echo one
+      if (!result.value?.torrentKey) {
+        summary.torrentKey = torrentKey;
+      }
       get().upsertTorrent(summary);
       set({
         magnetInput: "",
@@ -379,7 +393,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           )
         : id.split(/[/\\]/).pop() || "Torrent";
       const summary: TorrentSummary = {
-        torrentKey: nextTorrentKey++,
+        torrentKey,
         infoHash: hash.toLowerCase(),
         name,
         status: "queued",
@@ -413,12 +427,14 @@ export const useAppStore = create<AppState>((set, get) => ({
       return;
     }
 
+    const torrentKey = nextTorrentKey++;
     const result = await torrentCreate({
       paths,
       name: opts.name,
       comment: opts.comment || undefined,
       private: opts.isPrivate,
       trackers: opts.trackers.filter(Boolean),
+      torrentKey,
     });
 
     if (result.ok) {
@@ -435,7 +451,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     if (result.reason === "unavailable") {
       const summary: TorrentSummary = {
-        torrentKey: nextTorrentKey++,
+        torrentKey,
         infoHash: `created${Date.now().toString(16)}`.slice(0, 40),
         name: opts.name,
         status: "seeding",
@@ -469,7 +485,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   removeTorrent: async (infoHash) => {
-    const result = await torrentRemove(infoHash);
+    const existing = get().torrents.find((t) => t.infoHash === infoHash);
+    const result = await torrentRemove(infoHash, false, existing?.torrentKey);
     set((state) => ({
       torrents: state.torrents.filter((t) => t.infoHash !== infoHash),
       selectedInfoHash:
@@ -623,62 +640,106 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   applyProgressEvent: (payload) => {
-    const infoHash =
-      typeof payload.infoHash === "string"
-        ? payload.infoHash
-        : typeof payload.info_hash === "string"
-          ? payload.info_hash
-          : null;
-    if (!infoHash) return;
+    // Engine emits either a bulk { torrents: [...] } snapshot or a single-torrent object.
+    const items: Record<string, unknown>[] = Array.isArray(payload.torrents)
+      ? (payload.torrents as Record<string, unknown>[])
+      : payload.infoHash || payload.info_hash || payload.torrentKey != null
+        ? [payload]
+        : payload.info && typeof payload.info === "object"
+          ? [
+              {
+                ...(payload.info as Record<string, unknown>),
+                torrentKey: payload.torrentKey,
+              },
+            ]
+          : [];
+
+    if (items.length === 0) return;
 
     set((state) => {
-      const idx = state.torrents.findIndex((t) => t.infoHash === infoHash);
-      if (idx === -1) return state;
-      const t = state.torrents[idx];
-      const prev = t.progress;
-      const progressFrac =
-        typeof payload.progress === "number"
-          ? payload.progress > 1
-            ? payload.progress / 100
-            : payload.progress
-          : (prev?.progress ?? 0);
-      const downloadSpeed = Number(
-        payload.downloadSpeed ?? payload.download_speed ?? prev?.downloadSpeed ?? 0,
-      );
-      const uploadSpeed = Number(
-        payload.uploadSpeed ?? payload.upload_speed ?? prev?.uploadSpeed ?? 0,
-      );
-      const numPeers = Number(
-        payload.numPeers ?? payload.num_peers ?? prev?.numPeers ?? 0,
-      );
-      const downloaded = Number(
-        payload.downloaded ?? prev?.downloaded ?? 0,
-      );
-      const uploaded = Number(payload.uploaded ?? prev?.uploaded ?? 0);
-      const length = Number(payload.length ?? prev?.length ?? 0);
-      const status = payload.status
-        ? coerceStatus(payload.status)
-        : statusFromProgress(progressFrac, downloadSpeed);
+      let next = state.torrents.slice();
+      let changed = false;
+      // Drop pure mocks once real progress arrives
+      if (state.usingMockTorrents) {
+        next = next.filter((t) => !t.mock);
+      }
 
-      const next = state.torrents.slice();
-      next[idx] = {
-        ...t,
-        status,
-        name:
-          typeof payload.name === "string" && payload.name
-            ? payload.name
-            : t.name,
-        progress: {
-          progress: progressFrac,
-          downloadSpeed,
-          uploadSpeed,
-          numPeers,
-          downloaded,
-          uploaded,
-          length,
-        },
-        mock: false,
-      };
+      for (const item of items) {
+        const infoHash =
+          typeof item.infoHash === "string"
+            ? item.infoHash
+            : typeof item.info_hash === "string"
+              ? item.info_hash
+              : null;
+        const torrentKey =
+          typeof item.torrentKey === "number"
+            ? item.torrentKey
+            : typeof item.torrent_key === "number"
+              ? item.torrent_key
+              : null;
+
+        let idx = -1;
+        if (infoHash) {
+          idx = next.findIndex((t) => t.infoHash === infoHash);
+        }
+        if (idx === -1 && torrentKey != null) {
+          idx = next.findIndex((t) => t.torrentKey === torrentKey);
+        }
+
+        const progressFrac =
+          typeof item.progress === "number"
+            ? item.progress > 1
+              ? item.progress / 100
+              : item.progress
+            : 0;
+        const downloadSpeed = Number(item.downloadSpeed ?? 0);
+        const uploadSpeed = Number(item.uploadSpeed ?? 0);
+        const numPeers = Number(item.numPeers ?? 0);
+        const downloaded = Number(item.downloaded ?? 0);
+        const uploaded = Number(item.uploaded ?? 0);
+        const length = Number(item.length ?? 0);
+        const name =
+          typeof item.name === "string" && item.name
+            ? item.name
+            : infoHash
+              ? infoHash.slice(0, 8)
+              : "Torrent";
+        const status = item.status
+          ? coerceStatus(item.status)
+          : statusFromProgress(progressFrac, downloadSpeed);
+
+        const summary: TorrentSummary = {
+          torrentKey: torrentKey ?? nextTorrentKey++,
+          infoHash: infoHash ?? `pending-${torrentKey ?? Date.now()}`,
+          name,
+          status,
+          progress: {
+            progress: progressFrac,
+            downloadSpeed,
+            uploadSpeed,
+            numPeers,
+            downloaded,
+            uploaded,
+            length,
+          },
+          gradient: gradientForHash(infoHash ?? name),
+          mock: false,
+        };
+
+        if (idx === -1) {
+          next.push(summary);
+        } else {
+          next[idx] = {
+            ...next[idx],
+            ...summary,
+            torrentKey: next[idx].torrentKey,
+            gradient: next[idx].gradient ?? summary.gradient,
+          };
+        }
+        changed = true;
+      }
+
+      if (!changed) return state;
       return { torrents: next, usingMockTorrents: false };
     });
   },
