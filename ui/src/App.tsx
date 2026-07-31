@@ -139,9 +139,52 @@ function useShellBridge() {
   }, [windowTitle]);
 }
 
+/** Global keyboard shortcuts (Electron chrome parity lite). */
+function useKeyboardShortcuts() {
+  const back = useAppStore((s) => s.back);
+  const navigate = useAppStore((s) => s.navigate);
+  const view = useAppStore((s) => s.view);
+  const handleOpenTorrent = useAppStore((s) => s.handleOpenTorrent);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const meta = e.metaKey || e.ctrlKey;
+      const target = e.target as HTMLElement | null;
+      const typing =
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable);
+
+      if (e.key === "Escape" && view !== "torrent-list" && !typing) {
+        e.preventDefault();
+        back();
+        return;
+      }
+      if (meta && e.key === ",") {
+        e.preventDefault();
+        navigate("preferences");
+        return;
+      }
+      if (meta && e.key.toLowerCase() === "o" && !e.shiftKey) {
+        e.preventDefault();
+        void handleOpenTorrent();
+        return;
+      }
+      if (meta && e.key.toLowerCase() === "n") {
+        e.preventDefault();
+        navigate("create-torrent");
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [back, navigate, view, handleOpenTorrent]);
+}
+
 export default function App() {
   const view = useAppStore((s) => s.view);
   useShellBridge();
+  useKeyboardShortcuts();
 
   return (
     <div className={`app is-focused view-${view}`}>

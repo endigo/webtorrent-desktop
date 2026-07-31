@@ -6,6 +6,7 @@ import {
 } from "../types/torrent";
 import { DEFAULT_PREFS, mergePrefs, type AppPrefs } from "../types/prefs";
 import {
+  autostartSet,
   openFiles,
   openFolder,
   openTorrent,
@@ -493,10 +494,17 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   savePrefs: async (patch) => {
-    const next = patch
-      ? { ...get().prefs, ...patch }
-      : get().prefs;
+    const prev = get().prefs;
+    const next = patch ? { ...prev, ...patch } : get().prefs;
     set({ prefs: next });
+
+    // Keep OS login item in sync when startup flag changes.
+    if (patch && "startup" in patch && patch.startup !== prev.startup) {
+      const auto = await autostartSet(Boolean(next.startup));
+      if (!auto.ok && auto.reason === "error") {
+        set({ statusMessage: `Autostart: ${auto.message}` });
+      }
+    }
 
     const result = await prefsMerge(patch ?? next);
     if (result.ok) {

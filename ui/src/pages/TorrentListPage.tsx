@@ -1,3 +1,4 @@
+import { useCallback, useState } from "react";
 import { useAppStore } from "../store/useAppStore";
 import type { TorrentSummary } from "../types/torrent";
 
@@ -147,16 +148,47 @@ export function TorrentListPage() {
   const handleOpenFiles = useAppStore((s) => s.handleOpenFiles);
   const handleAddMagnet = useAppStore((s) => s.handleAddMagnet);
   const navigate = useAppStore((s) => s.navigate);
+  const [dragOver, setDragOver] = useState(false);
+
+  const onDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(true);
+  }, []);
+  const onDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(false);
+  }, []);
+  const onDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(false);
+    // Tauri onDragDropEvent handles real paths; HTML5 drop is a visual affordance
+    // and may only yield file names in the webview. Prefer magnet text drops.
+    const text = e.dataTransfer.getData("text/plain")?.trim();
+    if (text?.startsWith("magnet:")) {
+      void useAppStore.getState().handleAddMagnet(text);
+    }
+  }, []);
 
   return (
-    <div className="torrent-list" onContextMenu={(e) => e.preventDefault()}>
+    <div
+      className={`torrent-list${dragOver ? " is-dragover" : ""}`}
+      onContextMenu={(e) => e.preventDefault()}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+    >
       {torrents.map((t) => (
         <TorrentRow key={t.torrentKey} torrent={t} />
       ))}
 
-      <div className="torrent-placeholder">
+      <div className={`torrent-placeholder${dragOver ? " active" : ""}`}>
         <span className="ellipsis">
-          Drop a torrent file here or paste a magnet link
+          {dragOver
+            ? "Drop to add torrent or create from files"
+            : "Drop a torrent file here or paste a magnet link"}
         </span>
       </div>
 

@@ -448,6 +448,49 @@ export async function setWindowTitle(title: string): Promise<void> {
   await tryInvokeAliases(["set_window_title", "setWindowTitle"], { title });
 }
 
+// ---------------------------------------------------------------------------
+// Autostart (tauri-plugin-autostart)
+// ---------------------------------------------------------------------------
+
+export async function autostartIsEnabled(): Promise<InvokeResult<boolean>> {
+  if (!isTauriRuntime()) {
+    return { ok: false, reason: "unavailable", message: "Not running inside Tauri" };
+  }
+  try {
+    const { isEnabled } = await import("@tauri-apps/plugin-autostart");
+    return { ok: true, value: await isEnabled() };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (isMissingCommand(message)) {
+      return { ok: false, reason: "unavailable", message };
+    }
+    return { ok: false, reason: "error", message };
+  }
+}
+
+export async function autostartSet(
+  enabled: boolean,
+): Promise<InvokeResult<null>> {
+  if (!isTauriRuntime()) {
+    return { ok: false, reason: "unavailable", message: "Not running inside Tauri" };
+  }
+  try {
+    const mod = await import("@tauri-apps/plugin-autostart");
+    if (enabled) {
+      await mod.enable();
+    } else {
+      await mod.disable();
+    }
+    return { ok: true, value: null };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (isMissingCommand(message)) {
+      return { ok: false, reason: "unavailable", message };
+    }
+    return { ok: false, reason: "error", message };
+  }
+}
+
 /**
  * Listen for shell → UI dispatch events from Rust.
  * No-ops gracefully outside Tauri.

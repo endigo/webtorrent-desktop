@@ -322,6 +322,17 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+  transition:
+    border-color 0.15s ease,
+    color 0.15s ease,
+    background 0.15s ease;
+}
+
+.torrent-placeholder.active span,
+.torrent-list.is-dragover .torrent-placeholder span {
+  border-color: #4b79a1;
+  color: #cde;
+  background: rgba(75, 121, 161, 0.12);
 }
 
 .progress-bar {
