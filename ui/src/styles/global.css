@@ -1,0 +1,562 @@
+/*
+ * WebTorrent Desktop dark chrome — ported tones from static/main.css
+ * Background family: #282828 / rgb(40,40,40)
+ */
+
+*,
+*::after,
+*::before {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background: rgb(40, 40, 40);
+}
+
+body {
+  cursor: default;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.app {
+  color: #fafafa;
+  font-family:
+    BlinkMacSystemFont,
+    "Helvetica Neue",
+    Helvetica,
+    sans-serif;
+  font-size: 14px;
+  line-height: 1.5em;
+  height: 100%;
+  display: flex;
+  flex-flow: column;
+  background: rgb(30, 30, 30);
+  -webkit-user-select: none;
+  user-select: none;
+  animation: fadein 0.4s;
+}
+
+@keyframes fadein {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Material Icons via ligatures (optional; unicode fallbacks used if missing) */
+.icon {
+  font-family: "Material Icons", sans-serif;
+  font-weight: normal;
+  font-style: normal;
+  font-size: 24px;
+  display: inline-block;
+  line-height: 1;
+  text-transform: none;
+  letter-spacing: normal;
+  word-wrap: normal;
+  white-space: nowrap;
+  direction: ltr;
+  opacity: 0.85;
+  -webkit-font-smoothing: antialiased;
+  cursor: default;
+  -webkit-app-region: no-drag;
+}
+
+.icon.disabled {
+  opacity: 0.3;
+  pointer-events: none;
+}
+
+.icon:not(.disabled):hover {
+  opacity: 1;
+  filter: brightness(1.3);
+}
+
+.ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- Header (~38px, matches Electron chrome) ---------- */
+
+.header {
+  -webkit-app-region: drag;
+  app-region: drag;
+  background: rgb(40, 40, 40);
+  border-bottom: 1px solid rgb(30, 30, 30);
+  height: 38px;
+  padding-top: 7px;
+  overflow: hidden;
+  flex: 0 0 38px;
+  position: fixed;
+  left: 0;
+  top: 0;
+  right: 0;
+  font-size: 14px;
+  line-height: 1.5em;
+  z-index: 10;
+}
+
+.header .title {
+  opacity: 0.7;
+  position: absolute;
+  margin-top: 1px;
+  padding: 0 150px;
+  width: 100%;
+  text-align: center;
+  pointer-events: none;
+}
+
+.header .nav {
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.header .nav.left {
+  margin-left: 10px;
+  float: left;
+}
+
+.header .nav.right {
+  margin-right: 10px;
+  float: right;
+}
+
+.header .back,
+.header .forward {
+  font-size: 30px;
+  margin-top: -3px;
+}
+
+.header .nav-btn {
+  background: transparent;
+  border: none;
+  color: #fafafa;
+  padding: 0 4px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: default;
+  opacity: 0.85;
+  border-radius: 3px;
+}
+
+.header .nav-btn:hover:not(:disabled) {
+  opacity: 1;
+  filter: brightness(1.3);
+}
+
+.header .nav-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.header .nav-btn svg {
+  width: 22px;
+  height: 22px;
+  fill: currentColor;
+}
+
+.header .nav-btn.add svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* ---------- Content ---------- */
+
+.content {
+  position: relative;
+  width: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  margin-top: 38px;
+  height: calc(100% - 38px);
+}
+
+.app.view-player .content {
+  margin-top: 0;
+  height: 100%;
+}
+
+.app.view-player .header {
+  background: rgba(40, 40, 40, 0.85);
+  border-bottom: none;
+}
+
+/* ---------- Scrollbar ---------- */
+
+::-webkit-scrollbar {
+  width: 10px;
+  background-color: rgb(40, 40, 40);
+}
+
+::-webkit-scrollbar-thumb {
+  border: 1px solid rgb(40, 40, 40);
+  border-radius: 10px;
+  background: linear-gradient(to right, rgb(90, 90, 90), rgb(80, 80, 80));
+}
+
+::-webkit-scrollbar-track {
+  background-color: rgb(40, 40, 40);
+}
+
+/* ---------- Torrent list ---------- */
+
+.torrent-list {
+  height: 100%;
+  min-height: 100%;
+}
+
+.torrent {
+  background: linear-gradient(to bottom right, #4b79a1, #283e51);
+  background-repeat: no-repeat;
+  background-size: cover;
+  background-position: center;
+  position: relative;
+  height: 100px;
+  animation: fadein 0.4s;
+}
+
+.torrent:not(:last-child) {
+  border-bottom: 1px solid #282828;
+}
+
+.torrent .metadata {
+  position: absolute;
+  top: 20px;
+  left: 15px;
+  right: 15px;
+  width: calc(100% - 30px);
+  text-shadow: rgba(0, 0, 0, 0.5) 0 0 4px;
+}
+
+.torrent .metadata .meta-line span:not(:last-child)::after {
+  content: " • ";
+  opacity: 0.7;
+  padding-left: 4px;
+  padding-right: 4px;
+}
+
+.torrent:hover .metadata {
+  width: calc(100% - 120px);
+}
+
+.torrent .name {
+  font-size: 20px;
+  font-weight: bold;
+  line-height: 1.5em;
+  margin-bottom: 6px;
+}
+
+.torrent .torrent-controls {
+  display: none;
+}
+
+.torrent:hover .torrent-controls {
+  display: flex;
+  position: absolute;
+  top: 28px;
+  right: 12px;
+  gap: 8px;
+  align-items: center;
+}
+
+.torrent .control-btn {
+  background: transparent;
+  border: none;
+  color: #fafafa;
+  padding: 4px;
+  cursor: default;
+  opacity: 0.9;
+  text-shadow: rgba(0, 0, 0, 0.5) 0 0 4px;
+}
+
+.torrent .control-btn:hover {
+  opacity: 1;
+  filter: brightness(1.3);
+}
+
+.torrent .control-btn svg {
+  width: 28px;
+  height: 28px;
+  fill: currentColor;
+}
+
+.torrent .control-btn.play svg {
+  width: 40px;
+  height: 40px;
+}
+
+.torrent.selected {
+  outline: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.torrent-placeholder {
+  height: 100px;
+  padding: 10px;
+  font-size: 1.1em;
+}
+
+.torrent-placeholder span {
+  border: 5px #444 dashed;
+  border-radius: 5px;
+  color: #666;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.progress-bar {
+  display: inline-block;
+  width: 80px;
+  height: 4px;
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 2px;
+  margin-right: 8px;
+  vertical-align: middle;
+  overflow: hidden;
+}
+
+.progress-bar > i {
+  display: block;
+  height: 100%;
+  background: #fafafa;
+  border-radius: 2px;
+}
+
+/* ---------- Status toast ---------- */
+
+.status-bar {
+  position: fixed;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(20, 20, 20, 0.92);
+  border: 1px solid #444;
+  color: #eee;
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-size: 13px;
+  z-index: 20;
+  max-width: 90%;
+  pointer-events: none;
+}
+
+/* ---------- Page shells ---------- */
+
+.page-shell {
+  padding: 24px 28px;
+  max-width: 720px;
+}
+
+.page-shell h1 {
+  font-size: 22px;
+  font-weight: 500;
+  margin: 0 0 16px;
+  color: #fafafa;
+}
+
+.page-shell p {
+  color: #bbb;
+  margin: 0 0 12px;
+}
+
+.page-shell .field {
+  margin: 14px 0;
+}
+
+.page-shell label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: #ddd;
+}
+
+.page-shell input[type="text"],
+.page-shell input[type="number"],
+.page-shell textarea {
+  width: 100%;
+  background: rgb(50, 50, 50);
+  border: 1px solid #444;
+  color: #fafafa;
+  border-radius: 3px;
+  padding: 8px 10px;
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+}
+
+.page-shell input:focus,
+.page-shell textarea:focus {
+  border-color: #777;
+}
+
+.page-shell .actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.btn {
+  background: rgb(60, 60, 60);
+  border: 1px solid #555;
+  color: #fafafa;
+  border-radius: 3px;
+  padding: 8px 16px;
+  font-size: 14px;
+  font-family: inherit;
+  cursor: default;
+}
+
+.btn:hover {
+  filter: brightness(1.2);
+}
+
+.btn.primary {
+  background: #3d6e9e;
+  border-color: #4b79a1;
+}
+
+.btn.ghost {
+  background: transparent;
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0;
+  color: #ddd;
+}
+
+.checkbox-row input {
+  accent-color: #4b79a1;
+}
+
+/* ---------- Player shell ---------- */
+
+.player {
+  position: absolute;
+  inset: 0;
+  background: #000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: #eee;
+}
+
+.player .player-stage {
+  flex: 1;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(ellipse at center, #1a1a1a 0%, #000 70%);
+}
+
+.player .player-stage .placeholder {
+  text-align: center;
+  opacity: 0.7;
+}
+
+.player .player-stage .placeholder h2 {
+  font-weight: 400;
+  font-size: 20px;
+  margin: 0 0 8px;
+}
+
+.player .player-controls {
+  width: 100%;
+  background: rgba(40, 40, 40, 0.95);
+  border-top: 1px solid #222;
+  padding: 12px 20px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.player .scrubber {
+  width: 100%;
+  height: 4px;
+  background: #444;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.player .scrubber > i {
+  display: block;
+  height: 100%;
+  width: 0%;
+  background: #fafafa;
+}
+
+.player .control-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.player .control-row button {
+  background: transparent;
+  border: none;
+  color: #fafafa;
+  opacity: 0.85;
+  padding: 4px;
+}
+
+.player .control-row button:hover {
+  opacity: 1;
+}
+
+.player .control-row svg {
+  width: 28px;
+  height: 28px;
+  fill: currentColor;
+}
+
+.player .time {
+  margin-left: auto;
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Preferences ---------- */
+
+.prefs-section {
+  margin-bottom: 28px;
+}
+
+.prefs-section h2 {
+  font-size: 15px;
+  font-weight: 600;
+  color: #ccc;
+  border-bottom: 1px solid #3a3a3a;
+  padding-bottom: 6px;
+  margin: 0 0 12px;
+}
+
+.path-value {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  color: #aaa;
+  word-break: break-all;
+}

@@ -1,51 +1,55 @@
-import { useState } from "react";
-import reactLogo from "./assets/react.svg";
-import { invoke } from "@tauri-apps/api/core";
-import "./App.css";
+import { useEffect } from "react";
+import { Header } from "./components/Header";
+import { CreateTorrentPage } from "./pages/CreateTorrentPage";
+import { PlayerPage } from "./pages/PlayerPage";
+import { PreferencesPage } from "./pages/PreferencesPage";
+import { TorrentListPage } from "./pages/TorrentListPage";
+import { useAppStore } from "./store/useAppStore";
+import "./styles/global.css";
 
-function App() {
-  const [greetMsg, setGreetMsg] = useState("");
-  const [name, setName] = useState("");
+function ViewRouter() {
+  const view = useAppStore((s) => s.view);
 
-  async function greet() {
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    setGreetMsg(await invoke("greet", { name }));
+  switch (view) {
+    case "torrent-list":
+      return <TorrentListPage />;
+    case "player":
+      return <PlayerPage />;
+    case "create-torrent":
+      return <CreateTorrentPage />;
+    case "preferences":
+      return <PreferencesPage />;
   }
+}
 
+function StatusBar() {
+  const statusMessage = useAppStore((s) => s.statusMessage);
+  const setStatusMessage = useAppStore((s) => s.setStatusMessage);
+
+  useEffect(() => {
+    if (!statusMessage) return;
+    const id = window.setTimeout(() => setStatusMessage(null), 4000);
+    return () => window.clearTimeout(id);
+  }, [statusMessage, setStatusMessage]);
+
+  if (!statusMessage) return null;
   return (
-    <main className="container">
-      <h1>Welcome to Tauri + React</h1>
-
-      <div className="row">
-        <a href="https://vite.dev" target="_blank">
-          <img src="/vite.svg" className="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank">
-          <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <p>Click on the Tauri, Vite, and React logos to learn more.</p>
-
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          greet();
-        }}
-      >
-        <input
-          id="greet-input"
-          onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
-        />
-        <button type="submit">Greet</button>
-      </form>
-      <p>{greetMsg}</p>
-    </main>
+    <div className="status-bar" role="status">
+      {statusMessage}
+    </div>
   );
 }
 
-export default App;
+export default function App() {
+  const view = useAppStore((s) => s.view);
+
+  return (
+    <div className={`app is-focused view-${view}`}>
+      <Header />
+      <main className="content">
+        <ViewRouter />
+      </main>
+      <StatusBar />
+    </div>
+  );
+}
