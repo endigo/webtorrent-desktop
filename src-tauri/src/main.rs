@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    wt_tauri_scaffold_lib::run()
+    webtorrent_desktop_lib::run()
 }
