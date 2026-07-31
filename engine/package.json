@@ -1,0 +1,12 @@
+{
+  "name": "webtorrent-engine",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "index.js",
+  "dependencies": {
+    "webtorrent": "^2.5.1",
+    "parse-torrent": "^11.0.17",
+    "create-torrent": "^6.0.17"
+  }
+}

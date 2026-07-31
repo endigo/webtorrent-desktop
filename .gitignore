@@ -7,3 +7,9 @@ npm-debug.log*
 # JetBrains IntelliJ IDEA project files
 .idea
 *.iml
+
+# Tauri / UI
+ui/node_modules/
+ui/dist/
+src-tauri/target/
+engine/node_modules/

@@ -119,7 +119,12 @@
     "test": "standard && depcheck --ignores=standard,@babel/eslint-parser --ignore-dirs=build,dist",
     "test-integration": "npm run build && node ./test",
     "update-authors": "./bin/update-authors.sh",
-    "watch": "nodemon --exec \"npm run start\" --ext js,css --ignore build/ --ignore dist/"
+    "watch": "nodemon --exec \"npm run start\" --ext js,css --ignore build/ --ignore dist/",
+    "tauri": "cargo tauri",
+    "tauri:dev": "cargo tauri dev",
+    "tauri:build": "cargo tauri build",
+    "ui:install": "npm install --prefix ui",
+    "ui:dev": "npm run dev --prefix ui"
   },
   "standard": {
     "parser": "@babel/eslint-parser"
