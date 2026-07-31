@@ -436,10 +436,14 @@ export async function enginePing(): Promise<
 
 export const EVENTS = {
   ready: "app://ready",
+  engineReady: "engine://ready",
   dispatch: "app://dispatch",
   progress: "torrent://progress",
   metadata: "torrent://metadata",
   done: "torrent://done",
+  torrentReady: "torrent://ready",
+  torrentError: "torrent://error",
+  torrentServer: "torrent://server",
 } as const;
 
 /**
@@ -451,6 +455,48 @@ export async function onAppReady(handler: () => void): Promise<UnlistenFn> {
   }
   try {
     return await listen(EVENTS.ready, () => handler());
+  } catch {
+    return () => {};
+  }
+}
+
+/** Sidecar process is up (`engine://ready`). */
+export async function onEngineReady(handler: () => void): Promise<UnlistenFn> {
+  if (!isTauriRuntime()) {
+    return () => {};
+  }
+  try {
+    return await listen(EVENTS.engineReady, () => handler());
+  } catch {
+    return () => {};
+  }
+}
+
+export async function onTorrentReady(
+  handler: (payload: Record<string, unknown>) => void,
+): Promise<UnlistenFn> {
+  if (!isTauriRuntime()) {
+    return () => {};
+  }
+  try {
+    return await listen<Record<string, unknown>>(EVENTS.torrentReady, (event) => {
+      handler(event.payload ?? {});
+    });
+  } catch {
+    return () => {};
+  }
+}
+
+export async function onTorrentError(
+  handler: (payload: Record<string, unknown>) => void,
+): Promise<UnlistenFn> {
+  if (!isTauriRuntime()) {
+    return () => {};
+  }
+  try {
+    return await listen<Record<string, unknown>>(EVENTS.torrentError, (event) => {
+      handler(event.payload ?? {});
+    });
   } catch {
     return () => {};
   }

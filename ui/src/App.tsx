@@ -7,10 +7,13 @@ import { TorrentListPage } from "./pages/TorrentListPage";
 import {
   onAppReady,
   onDispatch,
+  onEngineReady,
   onFileDrop,
   onTorrentDone,
+  onTorrentError,
   onTorrentMetadata,
   onTorrentProgress,
+  onTorrentReady,
   setWindowTitle,
 } from "./lib/tauri";
 import { useAppStore } from "./store/useAppStore";
@@ -70,6 +73,7 @@ function classifyDroppedPaths(paths: string[]): {
 function useShellBridge() {
   const loadPrefs = useAppStore((s) => s.loadPrefs);
   const refreshTorrents = useAppStore((s) => s.refreshTorrents);
+  const probeEngine = useAppStore((s) => s.probeEngine);
   const handleDispatch = useAppStore((s) => s.handleDispatch);
   const applyProgressEvent = useAppStore((s) => s.applyProgressEvent);
   const setStatusMessage = useAppStore((s) => s.setStatusMessage);
@@ -81,6 +85,7 @@ function useShellBridge() {
   useEffect(() => {
     void loadPrefs();
     void refreshTorrents();
+    void probeEngine();
 
     let unsubs: Array<() => void> = [];
     let cancelled = false;
@@ -90,7 +95,12 @@ function useShellBridge() {
         onAppReady(() => {
           void loadPrefs();
           void refreshTorrents();
+          void probeEngine();
           setStatusMessage("Shell ready");
+        }),
+        onEngineReady(() => {
+          void probeEngine();
+          setStatusMessage("Engine ready");
         }),
         onDispatch((action, args) => handleDispatch(action, args)),
         onFileDrop((paths) => {
@@ -123,6 +133,16 @@ function useShellBridge() {
                 : null;
           if (name) setStatusMessage(`Metadata: ${name}`);
         }),
+        onTorrentReady((payload) => {
+          const info =
+            payload.info && typeof payload.info === "object"
+              ? (payload.info as Record<string, unknown>)
+              : payload;
+          applyProgressEvent({
+            ...info,
+            torrentKey: payload.torrentKey ?? info.torrentKey,
+          });
+        }),
         onTorrentDone((payload) => {
           const info =
             payload.info && typeof payload.info === "object"
@@ -141,6 +161,13 @@ function useShellBridge() {
                 ? payload.name
                 : "Torrent";
           setStatusMessage(`Finished: ${name}`);
+        }),
+        onTorrentError((payload) => {
+          const msg =
+            typeof payload.message === "string"
+              ? payload.message
+              : "Torrent error";
+          setStatusMessage(msg);
         }),
       ]);
       if (cancelled) {

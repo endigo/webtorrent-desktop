@@ -14,6 +14,7 @@ import {
   prefsMerge,
   torrentAdd,
   torrentCreate,
+  enginePing,
   torrentList,
   torrentRemove,
   type EngineTorrent,
@@ -191,6 +192,8 @@ interface AppState {
   loadPrefs: () => Promise<void>;
   savePrefs: (patch?: Partial<AppPrefs>) => Promise<void>;
   refreshTorrents: () => Promise<void>;
+  /** Probe engine_ping; clear mock list when sidecar is live. */
+  probeEngine: () => Promise<boolean>;
   /** Handle app://dispatch actions from the Rust shell */
   handleDispatch: (action: string, args: unknown[]) => void;
   upsertTorrent: (summary: TorrentSummary) => void;
@@ -551,6 +554,25 @@ export const useAppStore = create<AppState>((set, get) => ({
       return;
     }
     // Keep mocks when engine list is unavailable
+  },
+
+  probeEngine: async () => {
+    const result = await enginePing();
+    if (result.ok) {
+      set((state) => ({
+        usingMockTorrents: false,
+        // Clear sample rows once the real engine is reachable
+        torrents: state.usingMockTorrents
+          ? state.torrents.filter((t) => !t.mock)
+          : state.torrents,
+        statusMessage:
+          state.usingMockTorrents
+            ? "Engine connected"
+            : state.statusMessage,
+      }));
+      return true;
+    }
+    return false;
   },
 
   handleDispatch: (action, args) => {
