@@ -17,9 +17,9 @@ use tauri_plugin_dialog::DialogExt;
 use crate::dispatch::dispatch;
 
 const TITLE_TORRENT_FILE: &str = "Select a .torrent file.";
-const TITLE_ADD_FILES: &str = "Select a file to add.";
-const TITLE_SEED_FILE: &str = "Select a file for the torrent.";
-const TITLE_SEED_DIRECTORY: &str = "Select a folder for the torrent.";
+pub const TITLE_ADD_FILES: &str = "Select a file to add.";
+pub const TITLE_SEED_FILE: &str = "Select a file for the torrent.";
+pub const TITLE_SEED_DIRECTORY: &str = "Select a folder for the torrent.";
 
 /// Turn the plugin's `Option<Vec<FilePath>>` callback argument into plain
 /// strings and hand them to a `std::sync::mpsc` sender.
@@ -137,5 +137,5 @@ pub fn spawn_open_seed_directory<R: Runtime>(app: &AppHandle<R>) {
 }
 
 pub mod titles {
-    pub use super::{TITLE_ADD_FILES, TITLE_SEED_DIRECTORY, TITLE_SEED_FILE};
+    pub use super::{TITLE_ADD_FILES, TITLE_SEED_DIRECTORY};
 }
