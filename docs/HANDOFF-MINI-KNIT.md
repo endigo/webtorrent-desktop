@@ -11,9 +11,10 @@
 |------|--------|
 | Scaffold Tauri 2 + React UI | done |
 | W1b Frontend shell | **done** (14afe24, report ui/REPORT-W1b.md) |
-| W1a Rust shell | **done** (REPORT-W1a.md) |
-| W2 Engine sidecar | **done** (REPORT-W2.md) |
-| W3–W5 | not started |
+| W1a Rust shell | **done** (4267ea0, docs/REPORT-W1a.md) |
+| W2 Engine sidecar | **done** (f1b3cf5, docs/REPORT-W2.md) |
+| W3–W5 UI | partial (parallel UI agent + player stream wire 4ea1137) |
+| W4 Player | partial — stream_start → `<video>` wired; polish remaining |
 
 ## Latest commits
 
