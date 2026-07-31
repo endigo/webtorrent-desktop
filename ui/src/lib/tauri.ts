@@ -398,11 +398,22 @@ export async function torrentList(): Promise<InvokeResult<EngineTorrent[]>> {
   };
 }
 
+export interface StreamStartResult {
+  /** Base HTTP origin, e.g. http://localhost:12345 (files at /0, /1, …) */
+  localURL?: string;
+  localUrl?: string;
+  networkURL?: string;
+  url?: string;
+  port?: number;
+  infoHash?: string;
+  torrentKey?: number | string;
+}
+
 export async function streamStart(
   infoHash: string,
   torrentKey?: number,
-): Promise<InvokeResult<{ url?: string } | string | null>> {
-  // Rust: stream_start(info_hash?, torrent_key?)
+): Promise<InvokeResult<StreamStartResult | string | null>> {
+  // Rust: stream_start(info_hash?, torrent_key?) → { localURL, networkURL, port, … }
   return tryInvokeAliases(["stream_start"], {
     info_hash: infoHash,
     torrent_key: torrentKey ?? null,
