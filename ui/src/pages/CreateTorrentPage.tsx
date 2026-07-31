@@ -1,40 +1,56 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAppStore } from "../store/useAppStore";
+
+const DEFAULT_TRACKERS = [
+  "udp://tracker.opentrackr.org:1337/announce",
+  "udp://open.tracker.cl:1337/announce",
+  "udp://tracker.openbittorrent.com:6969/announce",
+].join("\n");
 
 export function CreateTorrentPage() {
   const paths = useAppStore((s) => s.createTorrentPaths);
   const navigate = useAppStore((s) => s.navigate);
-  const setStatusMessage = useAppStore((s) => s.setStatusMessage);
   const handleOpenFiles = useAppStore((s) => s.handleOpenFiles);
+  const handleOpenFolder = useAppStore((s) => s.handleOpenFolder);
+  const handleCreateTorrent = useAppStore((s) => s.handleCreateTorrent);
 
   const defaultName =
     paths.length > 0
-      ? paths[0].split(/[/\\]/).filter(Boolean).pop() ?? "untitled"
+      ? (paths[0].split(/[/\\]/).filter(Boolean).pop() ?? "untitled")
       : "untitled";
 
   const [name, setName] = useState(defaultName);
   const [comment, setComment] = useState("");
   const [isPrivate, setIsPrivate] = useState(false);
-  const [trackers, setTrackers] = useState(
-    "udp://tracker.opentrackr.org:1337/announce\nudp://open.tracker.cl:1337/announce",
-  );
+  const [trackers, setTrackers] = useState(DEFAULT_TRACKERS);
+  const [submitting, setSubmitting] = useState(false);
+
+  // Keep name in sync when paths change (e.g. re-pick files)
+  useEffect(() => {
+    if (paths.length > 0) {
+      const base = paths[0].split(/[/\\]/).filter(Boolean).pop();
+      if (base) setName(base);
+    }
+  }, [paths]);
 
   return (
     <div className="page-shell create-torrent">
       <h1>Create Torrent</h1>
       <p>
         Choose files or a folder, then create a <code>.torrent</code> metadata
-        file. Engine wiring lands in a later milestone.
+        file. Wired to <code>torrent_create</code> when the engine is available.
       </p>
 
       <div className="field torrent-attribute">
-        <label htmlFor="ct-files">Files</label>
+        <label htmlFor="ct-files">Files / folder</label>
         {paths.length === 0 ? (
           <p className="path-value">No files selected</p>
         ) : (
-          <ul className="path-value" style={{ margin: 0, paddingLeft: 18 }}>
+          <ul className="path-list">
             {paths.map((p) => (
-              <li key={p}>{p}</li>
+              <li key={p} className="path-value">
+                {p}
+              </li>
             ))}
           </ul>
         )}
@@ -45,6 +61,13 @@ export function CreateTorrentPage() {
             onClick={() => void handleOpenFiles()}
           >
             Choose files…
+          </button>
+          <button
+            type="button"
+            className="btn"
+            onClick={() => void handleOpenFolder()}
+          >
+            Choose folder…
           </button>
         </div>
       </div>
@@ -93,14 +116,21 @@ export function CreateTorrentPage() {
         <button
           type="button"
           className="btn primary"
+          disabled={submitting || !name.trim()}
           onClick={() => {
-            setStatusMessage(
-              `Create torrent “${name}” not wired yet (mock shell)`,
-            );
-            navigate("torrent-list");
+            setSubmitting(true);
+            void handleCreateTorrent({
+              name: name.trim() || "untitled",
+              comment: comment.trim(),
+              isPrivate,
+              trackers: trackers
+                .split(/\r?\n/)
+                .map((t) => t.trim())
+                .filter(Boolean),
+            }).finally(() => setSubmitting(false));
           }}
         >
-          Create torrent
+          {submitting ? "Creating…" : "Create torrent"}
         </button>
         <button
           type="button"

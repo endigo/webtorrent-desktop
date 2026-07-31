@@ -2,6 +2,7 @@ import { useAppStore } from "../store/useAppStore";
 import type { TorrentSummary } from "../types/torrent";
 
 function formatBytes(n: number): string {
+  if (!Number.isFinite(n) || n < 0) return "—";
   if (n < 1024) return `${n} B`;
   if (n < 1024 ** 2) return `${(n / 1024).toFixed(1)} KB`;
   if (n < 1024 ** 3) return `${(n / 1024 ** 2).toFixed(1)} MB`;
@@ -22,6 +23,10 @@ function statusLabel(t: TorrentSummary): string {
       return "Paused";
     case "done":
       return "Done";
+    case "queued":
+      return "Queued";
+    case "error":
+      return t.errorMessage ? `Error: ${t.errorMessage}` : "Error";
   }
 }
 
@@ -91,13 +96,16 @@ function TorrentRow({ torrent }: { torrent: TorrentSummary }) {
               <span>↑ {formatSpeed(prog.uploadSpeed)}</span>
             </>
           )}
-          {prog && (torrent.status === "paused" || torrent.status === "done") && (
-            <>
-              <span>
-                {pct}% · {formatBytes(prog.length)}
-              </span>
-            </>
-          )}
+          {prog &&
+            (torrent.status === "paused" ||
+              torrent.status === "done" ||
+              torrent.status === "queued") && (
+              <>
+                <span>
+                  {pct}% · {formatBytes(prog.length)}
+                </span>
+              </>
+            )}
         </div>
       </div>
       <div className="torrent-controls">
@@ -120,7 +128,7 @@ function TorrentRow({ torrent }: { torrent: TorrentSummary }) {
           aria-label={`Remove ${torrent.name}`}
           onClick={(e) => {
             e.stopPropagation();
-            removeTorrent(torrent.infoHash);
+            void removeTorrent(torrent.infoHash);
           }}
         >
           <DeleteIcon />
@@ -132,8 +140,12 @@ function TorrentRow({ torrent }: { torrent: TorrentSummary }) {
 
 export function TorrentListPage() {
   const torrents = useAppStore((s) => s.torrents);
+  const usingMockTorrents = useAppStore((s) => s.usingMockTorrents);
+  const magnetInput = useAppStore((s) => s.magnetInput);
+  const setMagnetInput = useAppStore((s) => s.setMagnetInput);
   const handleOpenTorrent = useAppStore((s) => s.handleOpenTorrent);
   const handleOpenFiles = useAppStore((s) => s.handleOpenFiles);
+  const handleAddMagnet = useAppStore((s) => s.handleAddMagnet);
   const navigate = useAppStore((s) => s.navigate);
 
   return (
@@ -141,12 +153,49 @@ export function TorrentListPage() {
       {torrents.map((t) => (
         <TorrentRow key={t.torrentKey} torrent={t} />
       ))}
+
       <div className="torrent-placeholder">
         <span className="ellipsis">
           Drop a torrent file here or paste a magnet link
         </span>
       </div>
-      <div className="page-shell" style={{ maxWidth: "none", paddingTop: 8 }}>
+
+      <div className="page-shell list-actions">
+        <div className="field magnet-field">
+          <label htmlFor="magnet-input">Magnet link or torrent path</label>
+          <div className="magnet-row">
+            <input
+              id="magnet-input"
+              type="text"
+              value={magnetInput}
+              placeholder="magnet:?xt=urn:btih:…"
+              onChange={(e) => setMagnetInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void handleAddMagnet();
+                }
+              }}
+              onPaste={(e) => {
+                const text = e.clipboardData.getData("text");
+                if (text.trim().startsWith("magnet:")) {
+                  // Allow paste then auto-add on next tick
+                  window.setTimeout(() => {
+                    void useAppStore.getState().handleAddMagnet(text.trim());
+                  }, 0);
+                }
+              }}
+            />
+            <button
+              type="button"
+              className="btn primary"
+              onClick={() => void handleAddMagnet()}
+            >
+              Add
+            </button>
+          </div>
+        </div>
+
         <div className="actions">
           <button
             type="button"
@@ -170,6 +219,13 @@ export function TorrentListPage() {
             Preferences
           </button>
         </div>
+
+        {usingMockTorrents && (
+          <p className="hint-muted">
+            Showing sample torrents — engine commands will replace this list
+            when W2 is ready.
+          </p>
+        )}
       </div>
     </div>
   );

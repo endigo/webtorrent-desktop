@@ -1,6 +1,23 @@
 import { create } from "zustand";
 import type { AppView, TorrentSummary } from "../types/torrent";
-import { openFiles, openTorrent, type OpenResult } from "../lib/tauri";
+import {
+  coerceStatus,
+  statusFromProgress,
+} from "../types/torrent";
+import { DEFAULT_PREFS, mergePrefs, type AppPrefs } from "../types/prefs";
+import {
+  openFiles,
+  openFolder,
+  openTorrent,
+  prefsGet,
+  prefsMerge,
+  torrentAdd,
+  torrentCreate,
+  torrentList,
+  torrentRemove,
+  type EngineTorrent,
+  type OpenResult,
+} from "../lib/tauri";
 
 const MOCK_TORRENTS: TorrentSummary[] = [
   {
@@ -19,6 +36,7 @@ const MOCK_TORRENTS: TorrentSummary[] = [
     },
     gradient: "linear-gradient(to bottom right, #4B79A1, #283E51)",
     testID: "bbb",
+    mock: true,
   },
   {
     torrentKey: 2,
@@ -36,6 +54,7 @@ const MOCK_TORRENTS: TorrentSummary[] = [
     },
     gradient: "linear-gradient(to bottom right, #141E30, #243B55)",
     testID: "sintel",
+    mock: true,
   },
   {
     torrentKey: 3,
@@ -53,6 +72,7 @@ const MOCK_TORRENTS: TorrentSummary[] = [
     },
     gradient: "linear-gradient(to bottom right, #3a1c71, #d76d77)",
     testID: "cosmos",
+    mock: true,
   },
   {
     torrentKey: 4,
@@ -70,8 +90,65 @@ const MOCK_TORRENTS: TorrentSummary[] = [
     },
     gradient: "linear-gradient(to bottom right, #0f2027, #203a43)",
     testID: "tears",
+    mock: true,
   },
 ];
+
+const GRADIENTS = [
+  "linear-gradient(to bottom right, #4B79A1, #283E51)",
+  "linear-gradient(to bottom right, #141E30, #243B55)",
+  "linear-gradient(to bottom right, #3a1c71, #d76d77)",
+  "linear-gradient(to bottom right, #0f2027, #203a43)",
+  "linear-gradient(to bottom right, #232526, #414345)",
+  "linear-gradient(to bottom right, #1D4350, #A43931)",
+];
+
+function gradientForHash(infoHash: string): string {
+  let n = 0;
+  for (let i = 0; i < infoHash.length; i++) {
+    n = (n + infoHash.charCodeAt(i) * (i + 1)) % GRADIENTS.length;
+  }
+  return GRADIENTS[n];
+}
+
+let nextTorrentKey = 100;
+
+export function engineTorrentToSummary(raw: EngineTorrent): TorrentSummary {
+  const progressFrac =
+    typeof raw.progress === "number"
+      ? raw.progress > 1
+        ? raw.progress / 100
+        : raw.progress
+      : 0;
+  const downloadSpeed = Number(raw.downloadSpeed ?? 0);
+  const uploadSpeed = Number(raw.uploadSpeed ?? 0);
+  const length = Number(raw.length ?? 0);
+  const downloaded = Number(raw.downloaded ?? progressFrac * length);
+  const uploaded = Number(raw.uploaded ?? 0);
+  const numPeers = Number(raw.numPeers ?? 0);
+  const status = raw.status
+    ? coerceStatus(raw.status)
+    : statusFromProgress(progressFrac, downloadSpeed);
+
+  return {
+    torrentKey:
+      typeof raw.torrentKey === "number" ? raw.torrentKey : nextTorrentKey++,
+    infoHash: String(raw.infoHash),
+    name: String(raw.name || raw.infoHash || "Unknown"),
+    status,
+    progress: {
+      progress: progressFrac,
+      downloadSpeed,
+      uploadSpeed,
+      numPeers,
+      downloaded,
+      uploaded,
+      length,
+    },
+    gradient: gradientForHash(String(raw.infoHash || "x")),
+    mock: false,
+  };
+}
 
 interface AppState {
   view: AppView;
@@ -79,19 +156,44 @@ interface AppState {
   historyIndex: number;
   windowTitle: string;
   torrents: TorrentSummary[];
+  /** When true, list is backed by mock data (engine not wired). */
+  usingMockTorrents: boolean;
   selectedInfoHash: string | null;
   statusMessage: string | null;
   createTorrentPaths: string[];
+  prefs: AppPrefs;
+  prefsLoaded: boolean;
+  magnetInput: string;
 
   navigate: (view: AppView) => void;
   back: () => void;
   forward: () => void;
   selectTorrent: (infoHash: string | null) => void;
   setStatusMessage: (message: string | null) => void;
+  setMagnetInput: (value: string) => void;
+  setCreateTorrentPaths: (paths: string[]) => void;
+  setPrefsLocal: (patch: Partial<AppPrefs>) => void;
+
   handleOpenTorrent: () => Promise<void>;
   handleOpenFiles: () => Promise<void>;
+  handleOpenFolder: () => Promise<void>;
+  handleAddMagnet: (magnet?: string) => Promise<void>;
+  handleCreateTorrent: (opts: {
+    name: string;
+    comment: string;
+    isPrivate: boolean;
+    trackers: string[];
+  }) => Promise<void>;
   playTorrent: (infoHash: string) => void;
-  removeTorrent: (infoHash: string) => void;
+  removeTorrent: (infoHash: string) => Promise<void>;
+
+  loadPrefs: () => Promise<void>;
+  savePrefs: (patch?: Partial<AppPrefs>) => Promise<void>;
+  refreshTorrents: () => Promise<void>;
+  /** Handle app://dispatch actions from the Rust shell */
+  handleDispatch: (action: string, args: unknown[]) => void;
+  upsertTorrent: (summary: TorrentSummary) => void;
+  applyProgressEvent: (payload: Record<string, unknown>) => void;
 }
 
 function formatOpenResult(label: string, result: OpenResult): string {
@@ -107,15 +209,29 @@ function formatOpenResult(label: string, result: OpenResult): string {
   return `${label}: ${result.message}`;
 }
 
+function looksLikeTorrentId(value: string): boolean {
+  const v = value.trim();
+  if (!v) return false;
+  if (v.startsWith("magnet:")) return true;
+  if (v.endsWith(".torrent")) return true;
+  if (/^[a-fA-F0-9]{40}$/.test(v)) return true;
+  if (/^[a-zA-Z2-7]{32}$/.test(v)) return true; // base32 infohash
+  return false;
+}
+
 export const useAppStore = create<AppState>((set, get) => ({
   view: "torrent-list",
   history: ["torrent-list"],
   historyIndex: 0,
   windowTitle: "WebTorrent",
   torrents: MOCK_TORRENTS,
+  usingMockTorrents: true,
   selectedInfoHash: null,
   statusMessage: null,
   createTorrentPaths: [],
+  prefs: { ...DEFAULT_PREFS },
+  prefsLoaded: false,
+  magnetInput: "",
 
   navigate: (view) => {
     const { history, historyIndex } = get();
@@ -157,9 +273,20 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   setStatusMessage: (message) => set({ statusMessage: message }),
+  setMagnetInput: (value) => set({ magnetInput: value }),
+  setCreateTorrentPaths: (paths) => set({ createTorrentPaths: paths }),
+  setPrefsLocal: (patch) =>
+    set((state) => ({ prefs: { ...state.prefs, ...patch } })),
 
   handleOpenTorrent: async () => {
     const result = await openTorrent();
+    if (result.ok) {
+      set({ statusMessage: formatOpenResult("Open torrent", result) });
+      for (const path of result.paths) {
+        await get().handleAddMagnet(path);
+      }
+      return;
+    }
     set({ statusMessage: formatOpenResult("Open torrent", result) });
   },
 
@@ -173,7 +300,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       get().navigate("create-torrent");
       return;
     }
-    // Graceful fallback: still open create-torrent shell with mock paths
     if (result.reason === "unavailable") {
       set({
         createTorrentPaths: ["/mock/path/movie.mp4"],
@@ -185,18 +311,368 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ statusMessage: formatOpenResult("Open files", result) });
   },
 
+  handleOpenFolder: async () => {
+    const result = await openFolder();
+    if (result.ok) {
+      set({
+        createTorrentPaths: result.paths,
+        statusMessage: formatOpenResult("Open folder", result),
+      });
+      get().navigate("create-torrent");
+      return;
+    }
+    if (result.reason === "unavailable") {
+      set({
+        createTorrentPaths: ["/mock/path/My Folder"],
+        statusMessage: formatOpenResult("Open folder", result),
+      });
+      get().navigate("create-torrent");
+      return;
+    }
+    set({ statusMessage: formatOpenResult("Open folder", result) });
+  },
+
+  handleAddMagnet: async (magnet) => {
+    const id = (magnet ?? get().magnetInput).trim();
+    if (!id) {
+      set({ statusMessage: "Paste a magnet link or torrent path first" });
+      return;
+    }
+    if (!looksLikeTorrentId(id) && !id.includes("/") && !id.includes("\\")) {
+      set({
+        statusMessage:
+          "Doesn’t look like a magnet, info-hash, or .torrent path",
+      });
+      return;
+    }
+
+    const result = await torrentAdd({ id });
+    if (result.ok) {
+      const summary = result.value
+        ? engineTorrentToSummary(result.value)
+        : engineTorrentToSummary({
+            infoHash: id.startsWith("magnet:")
+              ? id.slice(0, 48)
+              : id.slice(0, 40),
+            name: id.startsWith("magnet:")
+              ? "Magnet torrent"
+              : id.split(/[/\\]/).pop() || id,
+          });
+      get().upsertTorrent(summary);
+      set({
+        magnetInput: "",
+        statusMessage: `Added “${summary.name}”`,
+        usingMockTorrents: false,
+      });
+      return;
+    }
+
+    if (result.reason === "unavailable") {
+      // Optimistic local mock add so UI flow is testable without engine
+      const hash =
+        id.match(/btih:([a-fA-F0-9]{40})/i)?.[1] ??
+        (id.length >= 40 ? id.slice(0, 40) : `mock${Date.now().toString(16)}`);
+      const name = id.startsWith("magnet:")
+        ? decodeURIComponent(
+            id.match(/dn=([^&]+)/)?.[1]?.replace(/\+/g, " ") ?? "Magnet link",
+          )
+        : id.split(/[/\\]/).pop() || "Torrent";
+      const summary: TorrentSummary = {
+        torrentKey: nextTorrentKey++,
+        infoHash: hash.toLowerCase(),
+        name,
+        status: "queued",
+        progress: {
+          progress: 0,
+          downloadSpeed: 0,
+          uploadSpeed: 0,
+          numPeers: 0,
+          downloaded: 0,
+          uploaded: 0,
+          length: 0,
+        },
+        gradient: gradientForHash(hash),
+        mock: true,
+      };
+      get().upsertTorrent(summary);
+      set({
+        magnetInput: "",
+        statusMessage: `Queued “${name}” (engine not available yet)`,
+      });
+      return;
+    }
+
+    set({ statusMessage: `Add failed: ${result.message}` });
+  },
+
+  handleCreateTorrent: async (opts) => {
+    const paths = get().createTorrentPaths;
+    if (paths.length === 0) {
+      set({ statusMessage: "Choose files or a folder first" });
+      return;
+    }
+
+    const result = await torrentCreate({
+      paths,
+      name: opts.name,
+      comment: opts.comment || undefined,
+      private: opts.isPrivate,
+      trackers: opts.trackers.filter(Boolean),
+    });
+
+    if (result.ok) {
+      if (result.value && "infoHash" in result.value && result.value.infoHash) {
+        get().upsertTorrent(engineTorrentToSummary(result.value as EngineTorrent));
+      }
+      set({
+        statusMessage: `Created torrent “${opts.name}”`,
+        createTorrentPaths: [],
+      });
+      get().navigate("torrent-list");
+      return;
+    }
+
+    if (result.reason === "unavailable") {
+      const summary: TorrentSummary = {
+        torrentKey: nextTorrentKey++,
+        infoHash: `created${Date.now().toString(16)}`.slice(0, 40),
+        name: opts.name,
+        status: "seeding",
+        progress: {
+          progress: 1,
+          downloadSpeed: 0,
+          uploadSpeed: 0,
+          numPeers: 0,
+          downloaded: 0,
+          uploaded: 0,
+          length: 0,
+        },
+        gradient: gradientForHash(opts.name),
+        mock: true,
+      };
+      get().upsertTorrent(summary);
+      set({
+        statusMessage: `Created “${opts.name}” (mock — engine not wired)`,
+        createTorrentPaths: [],
+      });
+      get().navigate("torrent-list");
+      return;
+    }
+
+    set({ statusMessage: `Create failed: ${result.message}` });
+  },
+
   playTorrent: (infoHash) => {
     set({ selectedInfoHash: infoHash });
     get().navigate("player");
   },
 
-  removeTorrent: (infoHash) => {
+  removeTorrent: async (infoHash) => {
+    const result = await torrentRemove(infoHash);
     set((state) => ({
       torrents: state.torrents.filter((t) => t.infoHash !== infoHash),
       selectedInfoHash:
         state.selectedInfoHash === infoHash ? null : state.selectedInfoHash,
-      statusMessage: `Removed torrent ${infoHash.slice(0, 8)}…`,
+      statusMessage:
+        result.ok || result.reason === "unavailable"
+          ? `Removed torrent ${infoHash.slice(0, 8)}…`
+          : `Remove failed: ${result.message}`,
     }));
+  },
+
+  loadPrefs: async () => {
+    const result = await prefsGet();
+    if (result.ok) {
+      set({
+        prefs: mergePrefs(DEFAULT_PREFS, result.value),
+        prefsLoaded: true,
+      });
+      return;
+    }
+    set({ prefsLoaded: true });
+  },
+
+  savePrefs: async (patch) => {
+    const next = patch
+      ? { ...get().prefs, ...patch }
+      : get().prefs;
+    set({ prefs: next });
+
+    const result = await prefsMerge(patch ?? next);
+    if (result.ok) {
+      set({
+        prefs: mergePrefs(DEFAULT_PREFS, result.value),
+        statusMessage: "Preferences saved",
+      });
+      return;
+    }
+    if (result.reason === "unavailable") {
+      set({
+        statusMessage: "Preferences saved locally (prefs_set not available yet)",
+      });
+      return;
+    }
+    set({ statusMessage: `Save prefs failed: ${result.message}` });
+  },
+
+  refreshTorrents: async () => {
+    const result = await torrentList();
+    if (result.ok) {
+      const list = result.value.map(engineTorrentToSummary);
+      set({
+        torrents: list,
+        usingMockTorrents: false,
+      });
+      return;
+    }
+    // Keep mocks when engine list is unavailable
+  },
+
+  handleDispatch: (action, args) => {
+    switch (action) {
+      case "addTorrent": {
+        const id = args[0];
+        if (typeof id === "string") {
+          void get().handleAddMagnet(id);
+        }
+        break;
+      }
+      case "onOpen": {
+        const payload = args[0];
+        const ids = Array.isArray(payload)
+          ? payload
+          : typeof payload === "string"
+            ? [payload]
+            : [];
+        for (const id of ids) {
+          if (typeof id === "string") {
+            // Files to seed → create torrent; torrents/magnets → add
+            if (
+              !id.startsWith("magnet:") &&
+              !id.endsWith(".torrent") &&
+              !/^[a-fA-F0-9]{40}$/.test(id)
+            ) {
+              set({ createTorrentPaths: [id] });
+              get().navigate("create-torrent");
+            } else {
+              void get().handleAddMagnet(id);
+            }
+          }
+        }
+        break;
+      }
+      case "showCreateTorrent": {
+        const payload = args[0];
+        const paths = Array.isArray(payload)
+          ? payload.filter((p): p is string => typeof p === "string")
+          : typeof payload === "string"
+            ? [payload]
+            : [];
+        set({ createTorrentPaths: paths });
+        get().navigate("create-torrent");
+        break;
+      }
+      case "openTorrentAddress": {
+        get().navigate("torrent-list");
+        set({
+          statusMessage: "Paste a magnet link below",
+        });
+        break;
+      }
+      case "backToList": {
+        get().navigate("torrent-list");
+        break;
+      }
+      case "stateSaveImmediate": {
+        void get().savePrefs();
+        break;
+      }
+      default:
+        console.debug("[dispatch]", action, args);
+    }
+  },
+
+  upsertTorrent: (summary) => {
+    set((state) => {
+      const idx = state.torrents.findIndex(
+        (t) => t.infoHash === summary.infoHash,
+      );
+      if (idx === -1) {
+        // Drop pure mocks when first real torrent arrives
+        const base =
+          state.usingMockTorrents && !summary.mock
+            ? state.torrents.filter((t) => !t.mock)
+            : state.torrents;
+        return {
+          torrents: [...base, summary],
+          usingMockTorrents: summary.mock ? state.usingMockTorrents : false,
+        };
+      }
+      const next = state.torrents.slice();
+      next[idx] = { ...next[idx], ...summary };
+      return { torrents: next };
+    });
+  },
+
+  applyProgressEvent: (payload) => {
+    const infoHash =
+      typeof payload.infoHash === "string"
+        ? payload.infoHash
+        : typeof payload.info_hash === "string"
+          ? payload.info_hash
+          : null;
+    if (!infoHash) return;
+
+    set((state) => {
+      const idx = state.torrents.findIndex((t) => t.infoHash === infoHash);
+      if (idx === -1) return state;
+      const t = state.torrents[idx];
+      const prev = t.progress;
+      const progressFrac =
+        typeof payload.progress === "number"
+          ? payload.progress > 1
+            ? payload.progress / 100
+            : payload.progress
+          : (prev?.progress ?? 0);
+      const downloadSpeed = Number(
+        payload.downloadSpeed ?? payload.download_speed ?? prev?.downloadSpeed ?? 0,
+      );
+      const uploadSpeed = Number(
+        payload.uploadSpeed ?? payload.upload_speed ?? prev?.uploadSpeed ?? 0,
+      );
+      const numPeers = Number(
+        payload.numPeers ?? payload.num_peers ?? prev?.numPeers ?? 0,
+      );
+      const downloaded = Number(
+        payload.downloaded ?? prev?.downloaded ?? 0,
+      );
+      const uploaded = Number(payload.uploaded ?? prev?.uploaded ?? 0);
+      const length = Number(payload.length ?? prev?.length ?? 0);
+      const status = payload.status
+        ? coerceStatus(payload.status)
+        : statusFromProgress(progressFrac, downloadSpeed);
+
+      const next = state.torrents.slice();
+      next[idx] = {
+        ...t,
+        status,
+        name:
+          typeof payload.name === "string" && payload.name
+            ? payload.name
+            : t.name,
+        progress: {
+          progress: progressFrac,
+          downloadSpeed,
+          uploadSpeed,
+          numPeers,
+          downloaded,
+          uploaded,
+          length,
+        },
+        mock: false,
+      };
+      return { torrents: next, usingMockTorrents: false };
+    });
   },
 }));
 
