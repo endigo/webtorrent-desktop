@@ -13,27 +13,28 @@
 | W1b Frontend shell | **done** (14afe24, report ui/REPORT-W1b.md) |
 | W1a Rust shell | **done** (4267ea0, docs/REPORT-W1a.md) |
 | W2 Engine sidecar | **done** (f1b3cf5, docs/REPORT-W2.md) |
-| W3–W5 UI | partial (parallel UI agent + player stream wire 4ea1137) |
-| W4 Player | partial — stream_start → `<video>` wired; polish remaining |
+| W3 Torrent list + create | **done** (44549ba, docs/REPORT-W3.md) |
+| W4 Player | **partial** (4ea1137 — stream_start → video; polish remaining) |
+| W5 Preferences | **done** (c0c092f, docs/REPORT-W5.md) |
+| W6 Packaging | not started |
 
 ## Latest commits
 
-See `git log --oneline -8`.
+See `git log --oneline -12`.
 
 ## Toolchain on mini-knit
 
 - rustc/cargo via `~/.cargo/env`
 - `cargo tauri` installed
 - node/npm, claude, grok
-- use `screen` for detached agent sessions (tmux may need brew install)
+- use `screen` for detached agent sessions
 
 ## Agent sessions (screen)
 
 ```bash
 screen -ls
-screen -r wt-w1a-claude   # W1a completion
-screen -r wt-w2-claude    # engine after W1a
-screen -r wt-coord-grok   # coordinator / UI follow-ups
+screen -r wt-w1a-grok     # finished W1a+W2; may do W4 polish
+screen -r wt-grok         # UI waves W3/W5
 ```
 
 ## Verify build
