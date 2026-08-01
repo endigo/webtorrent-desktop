@@ -159,12 +159,6 @@ export function PlayerPage() {
             onPause={() => setPlaying(false)}
             onEnded={() => setPlaying(false)}
             onClick={togglePlay}
-            style={{
-              width: "100%",
-              height: "100%",
-              objectFit: "contain",
-              background: "#000",
-            }}
           />
         ) : (
           <div className="placeholder">
@@ -182,9 +176,10 @@ export function PlayerPage() {
         )}
       </div>
       <div className="player-controls">
-        <div className="scrubber" aria-hidden={!streamUrl}>
+        <div className="scrubber">
           <input
             type="range"
+            className="scrubber-input"
             min={0}
             max={100}
             step={0.1}
@@ -192,49 +187,59 @@ export function PlayerPage() {
             onChange={onSeek}
             disabled={!streamUrl || !duration}
             aria-label="Seek"
-            style={{ width: "100%" }}
           />
-          <i style={{ width: `${scrubPct}%` }} />
         </div>
         <div className="control-row">
-          <button
-            type="button"
-            title={playing ? "Pause" : "Play"}
-            aria-label={playing ? "Pause" : "Play"}
-            onClick={togglePlay}
-            disabled={!streamUrl}
-          >
-            {playing ? <PauseIcon /> : <PlayIcon />}
-          </button>
-          <button type="button" title="Volume" aria-label="Volume" disabled={!streamUrl}>
-            <VolumeIcon />
-          </button>
-          <input
-            type="range"
-            min={0}
-            max={100}
-            value={volume * 100}
-            onChange={onVolume}
-            disabled={!streamUrl}
-            aria-label="Volume"
-            style={{ width: 80 }}
-          />
+          <div className="control-left">
+            <button
+              type="button"
+              className="icon-btn"
+              title={playing ? "Pause" : "Play"}
+              aria-label={playing ? "Pause" : "Play"}
+              onClick={togglePlay}
+              disabled={!streamUrl}
+            >
+              {playing ? <PauseIcon /> : <PlayIcon />}
+            </button>
+            <button
+              type="button"
+              className="icon-btn"
+              title="Volume"
+              aria-label="Volume"
+              disabled={!streamUrl}
+            >
+              <VolumeIcon />
+            </button>
+            <input
+              type="range"
+              className="volume-slider"
+              min={0}
+              max={100}
+              value={volume * 100}
+              onChange={onVolume}
+              disabled={!streamUrl}
+              aria-label="Volume"
+            />
+          </div>
+
           <span className="time">
             {formatTime(currentTime)} / {formatTime(duration)}
           </span>
-          {streamUrl && (
-            <span className="time" title={streamUrl} style={{ opacity: 0.6, fontSize: 11 }}>
-              streaming
-            </span>
-          )}
-          <button
-            type="button"
-            className="btn ghost"
-            style={{ marginLeft: "auto" }}
-            onClick={() => navigate("torrent-list")}
-          >
-            Back
-          </button>
+
+          <div className="control-right">
+            {status ? (
+              <span className="stream-status" title={status}>
+                {status}
+              </span>
+            ) : null}
+            <button
+              type="button"
+              className="btn ghost"
+              onClick={() => navigate("torrent-list")}
+            >
+              Back
+            </button>
+          </div>
         </div>
       </div>
     </div>
