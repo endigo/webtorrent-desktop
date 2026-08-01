@@ -265,12 +265,20 @@ body {
   flex-shrink: 0;
 }
 
-.torrent .metadata .meta-line > span:not(:last-child)::after {
+/* Dot separators between meta items — never on the progress track itself */
+.torrent .metadata .meta-line > span:not(:last-child):not(.progress-bar)::after {
   content: "•";
   opacity: 0.7;
   margin-left: 8px;
   margin-right: 8px;
-  /* Keep the separator centered with the text line */
+  line-height: 1;
+}
+
+/* Separator after the bar, before the next text span (e.g. "35%") */
+.torrent .metadata .meta-line > span.progress-bar + span::before {
+  content: "•";
+  opacity: 0.7;
+  margin-right: 8px;
   line-height: 1;
 }
 
@@ -361,17 +369,27 @@ body {
   height: 4px;
   background: rgba(0, 0, 0, 0.35);
   border-radius: 2px;
-  overflow: hidden;
+  overflow: hidden; /* clip fill — no thumb/dot */
   flex-shrink: 0;
-  /* Center the thin bar within the flex line-height of surrounding text */
   align-self: center;
+  margin: 0 4px;
+  /* kill any accidental ::before/::after from other rules */
+  pointer-events: none;
+}
+
+.progress-bar::before,
+.progress-bar::after {
+  content: none !important;
+  display: none !important;
 }
 
 .progress-bar > i {
   display: block;
   height: 100%;
+  width: 0;
+  max-width: 100%;
   background: #fafafa;
-  border-radius: 2px;
+  border-radius: 0; /* rectangular fill, not a pill/dot */
 }
 
 /* ---------- Status toast ---------- */
