@@ -255,7 +255,11 @@ interface AppState {
   removeTorrent: (infoHash: string) => Promise<void>;
 
   loadPrefs: () => Promise<void>;
-  savePrefs: (patch?: Partial<AppPrefs>) => Promise<void>;
+  /** Persist prefs. Pass `{ silent: true }` to skip the "Preferences saved" toast. */
+  savePrefs: (
+    patch?: Partial<AppPrefs>,
+    opts?: { silent?: boolean },
+  ) => Promise<void>;
   refreshTorrents: () => Promise<void>;
   /** Probe engine_ping; clear mock list when sidecar is live. */
   probeEngine: () => Promise<boolean>;
@@ -602,9 +606,20 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (result.ok) {
       const merged = mergePrefs(DEFAULT_PREFS, result.value);
       // Keep savedTorrents array from disk if present
-      const raw = result.value as AppPrefs & { savedTorrents?: SavedTorrent[] };
+      const raw = result.value as Partial<AppPrefs> & {
+        savedTorrents?: SavedTorrent[];
+        colorScheme?: unknown;
+      };
       if (Array.isArray(raw.savedTorrents)) {
         merged.savedTorrents = raw.savedTorrents;
+      }
+      // Guard unknown colorScheme values from older configs
+      if (
+        raw.colorScheme !== "light" &&
+        raw.colorScheme !== "dark" &&
+        raw.colorScheme !== "auto"
+      ) {
+        merged.colorScheme = DEFAULT_PREFS.colorScheme;
       }
       set({
         prefs: merged,
@@ -615,7 +630,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ prefsLoaded: true });
   },
 
-  savePrefs: async (patch) => {
+  savePrefs: async (patch, opts) => {
+    const silent = opts?.silent === true;
     const prev = get().prefs;
     const next = patch ? { ...prev, ...patch } : get().prefs;
     set({ prefs: next });
@@ -632,14 +648,18 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (result.ok) {
       set({
         prefs: mergePrefs(DEFAULT_PREFS, result.value),
-        statusMessage: "Preferences saved",
+        // Only toast on explicit user save (Preferences → Done), not theme toggle / background
+        ...(silent ? {} : { statusMessage: "Preferences saved" }),
       });
       return;
     }
     if (result.reason === "unavailable") {
-      set({
-        statusMessage: "Preferences saved locally (prefs_set not available yet)",
-      });
+      if (!silent) {
+        set({
+          statusMessage:
+            "Preferences saved locally (prefs_set not available yet)",
+        });
+      }
       return;
     }
     set({ statusMessage: `Save prefs failed: ${result.message}` });
@@ -735,7 +755,9 @@ export const useAppStore = create<AppState>((set, get) => ({
         break;
       }
       case "stateSaveImmediate": {
-        void get().savePrefs();
+        // Quiet flush (e.g. app quit) — do not spam "Preferences saved"
+        void get().savePrefs(undefined, { silent: true });
+        void get().persistTorrentsNow();
         break;
       }
       default:

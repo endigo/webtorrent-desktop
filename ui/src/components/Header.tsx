@@ -47,7 +47,8 @@ export function Header() {
   const toggleColorScheme = () => {
     const next = isDark ? "light" : "dark";
     setColorScheme(next);
-    void savePrefs({ colorScheme: next });
+    // Silent: theme toggles should not stack "Preferences saved" toasts
+    void savePrefs({ colorScheme: next }, { silent: true });
   };
 
   return (

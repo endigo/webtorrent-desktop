@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Box } from "@mantine/core";
+import { Box, useMantineColorScheme } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { Header } from "./components/Header";
 import { CreateTorrentPage } from "./pages/CreateTorrentPage";
@@ -21,6 +21,7 @@ import {
   setWindowTitle,
 } from "./lib/tauri";
 import { useAppStore } from "./store/useAppStore";
+import { isColorSchemePref } from "./types/prefs";
 
 function ViewRouter() {
   const view = useAppStore((s) => s.view);
@@ -70,7 +71,10 @@ function useStatusNotifications() {
     ) {
       return;
     }
+    // Stable id for identical messages so rapid repeats update one toast
+    // instead of stacking five "Preferences saved" cards.
     notifications.show({
+      id: `status:${msg.slice(0, 80)}`,
       message: msg,
       color: "dark",
       autoClose: 3500,
@@ -257,6 +261,19 @@ function useShellBridge() {
   }, [windowTitle]);
 }
 
+/** Apply saved appearance pref to Mantine once prefs load / change. */
+function useColorSchemeSync() {
+  const prefsLoaded = useAppStore((s) => s.prefsLoaded);
+  const colorScheme = useAppStore((s) => s.prefs.colorScheme);
+  const { setColorScheme } = useMantineColorScheme();
+
+  useEffect(() => {
+    if (!prefsLoaded) return;
+    if (!isColorSchemePref(colorScheme)) return;
+    setColorScheme(colorScheme);
+  }, [prefsLoaded, colorScheme, setColorScheme]);
+}
+
 function useKeyboardShortcuts() {
   const back = useAppStore((s) => s.back);
   const navigate = useAppStore((s) => s.navigate);
@@ -301,6 +318,7 @@ function useKeyboardShortcuts() {
 export default function App() {
   const view = useAppStore((s) => s.view);
   useShellBridge();
+  useColorSchemeSync();
   useKeyboardShortcuts();
   useStatusNotifications();
 
