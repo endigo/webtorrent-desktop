@@ -115,7 +115,27 @@ function gradientForHash(infoHash: string): string {
 
 let nextTorrentKey = 100;
 
-export function engineTorrentToSummary(raw: EngineTorrent): TorrentSummary {
+/** Derive a display name from a magnet / path / info-hash string. */
+export function displayNameFromTorrentId(id: string): string {
+  if (id.startsWith("magnet:")) {
+    const dn = id.match(/[?&]dn=([^&]+)/i)?.[1];
+    if (dn) {
+      try {
+        return decodeURIComponent(dn.replace(/\+/g, " "));
+      } catch {
+        return dn;
+      }
+    }
+    const btih = id.match(/btih:([a-zA-Z0-9]+)/i)?.[1];
+    return btih ? `Magnet ${btih.slice(0, 8)}…` : "Magnet torrent";
+  }
+  const base = id.split(/[/\\]/).pop() || id;
+  return base.replace(/\.torrent$/i, "") || base;
+}
+
+export function engineTorrentToSummary(
+  raw: EngineTorrent & { torrentId?: string },
+): TorrentSummary {
   const progressFrac =
     typeof raw.progress === "number"
       ? raw.progress > 1
@@ -128,15 +148,53 @@ export function engineTorrentToSummary(raw: EngineTorrent): TorrentSummary {
   const downloaded = Number(raw.downloaded ?? progressFrac * length);
   const uploaded = Number(raw.uploaded ?? 0);
   const numPeers = Number(raw.numPeers ?? 0);
+  const ready =
+    typeof (raw as { ready?: boolean }).ready === "boolean"
+      ? (raw as { ready?: boolean }).ready
+      : undefined;
   const status = raw.status
     ? coerceStatus(raw.status)
-    : statusFromProgress(progressFrac, downloadSpeed);
+    : statusFromProgress(progressFrac, downloadSpeed, { ready, numPeers });
+
+  const torrentId =
+    typeof raw.torrentId === "string"
+      ? raw.torrentId
+      : typeof (raw as { torrent_id?: string }).torrent_id === "string"
+        ? (raw as { torrent_id?: string }).torrent_id!
+        : "";
+
+  const infoHashRaw = raw.infoHash ?? (raw as { info_hash?: string }).info_hash;
+  const infoHash =
+    typeof infoHashRaw === "string" &&
+    infoHashRaw &&
+    infoHashRaw !== "undefined"
+      ? infoHashRaw
+      : torrentId.startsWith("magnet:")
+        ? (torrentId.match(/btih:([a-fA-F0-9]{40})/i)?.[1]?.toLowerCase() ??
+          `pending-${raw.torrentKey ?? Date.now()}`)
+        : torrentId
+          ? `pending-${raw.torrentKey ?? Date.now()}`
+          : `pending-${Date.now()}`;
+
+  const nameRaw = raw.name;
+  const name =
+    typeof nameRaw === "string" && nameRaw && nameRaw !== "undefined"
+      ? nameRaw
+      : torrentId
+        ? displayNameFromTorrentId(torrentId)
+        : infoHash.startsWith("pending-")
+          ? "Fetching metadata…"
+          : infoHash.slice(0, 10);
 
   return {
     torrentKey:
-      typeof raw.torrentKey === "number" ? raw.torrentKey : nextTorrentKey++,
-    infoHash: String(raw.infoHash),
-    name: String(raw.name || raw.infoHash || "Unknown"),
+      typeof raw.torrentKey === "number"
+        ? raw.torrentKey
+        : typeof raw.torrentKey === "string" && /^\d+$/.test(raw.torrentKey)
+          ? Number(raw.torrentKey)
+          : nextTorrentKey++,
+    infoHash,
+    name,
     status,
     progress: {
       progress: progressFrac,
@@ -147,7 +205,7 @@ export function engineTorrentToSummary(raw: EngineTorrent): TorrentSummary {
       uploaded,
       length,
     },
-    gradient: gradientForHash(String(raw.infoHash || "x")),
+    gradient: gradientForHash(infoHash),
     mock: false,
   };
 }
@@ -361,21 +419,23 @@ export const useAppStore = create<AppState>((set, get) => ({
           : undefined,
     });
     if (result.ok) {
-      const summary = result.value
-        ? engineTorrentToSummary(result.value)
-        : engineTorrentToSummary({
-            torrentKey,
-            infoHash: id.startsWith("magnet:")
-              ? id.slice(0, 48)
-              : id.slice(0, 40),
-            name: id.startsWith("magnet:")
-              ? "Magnet torrent"
-              : id.split(/[/\\]/).pop() || id,
-          });
-      // Prefer our assigned key if engine didn't echo one
-      if (!result.value?.torrentKey) {
-        summary.torrentKey = torrentKey;
-      }
+      // Engine add returns only { torrentKey, torrentId } — not full metadata.
+      // Build a provisional row from the request; metadata/progress events fill in.
+      const summary = engineTorrentToSummary({
+        ...(result.value ?? {}),
+        torrentKey,
+        torrentId: id,
+        infoHash:
+          typeof result.value?.infoHash === "string"
+            ? result.value.infoHash
+            : undefined,
+        name:
+          typeof result.value?.name === "string"
+            ? result.value.name
+            : displayNameFromTorrentId(id),
+      });
+      summary.torrentKey = torrentKey;
+      summary.status = "queued";
       get().upsertTorrent(summary);
       set({
         magnetInput: "",
@@ -641,9 +701,14 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   upsertTorrent: (summary) => {
     set((state) => {
-      const idx = state.torrents.findIndex(
+      let idx = state.torrents.findIndex(
         (t) => t.infoHash === summary.infoHash,
       );
+      if (idx === -1) {
+        idx = state.torrents.findIndex(
+          (t) => t.torrentKey === summary.torrentKey,
+        );
+      }
       if (idx === -1) {
         // Drop pure mocks when first real torrent arrives
         const base =
@@ -656,7 +721,20 @@ export const useAppStore = create<AppState>((set, get) => ({
         };
       }
       const next = state.torrents.slice();
-      next[idx] = { ...next[idx], ...summary };
+      const prev = next[idx];
+      next[idx] = {
+        ...prev,
+        ...summary,
+        // Keep a real name if the update is provisional
+        name:
+          summary.name &&
+          summary.name !== "Unknown" &&
+          summary.name !== "Fetching metadata…"
+            ? summary.name
+            : prev.name,
+        torrentKey: prev.torrentKey || summary.torrentKey,
+        gradient: prev.gradient ?? summary.gradient,
+      };
       return { torrents: next };
     });
   },
@@ -687,52 +765,78 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
 
       for (const item of items) {
-        const infoHash =
+        const infoHashRaw =
           typeof item.infoHash === "string"
             ? item.infoHash
             : typeof item.info_hash === "string"
               ? item.info_hash
               : null;
+        const infoHash =
+          infoHashRaw && infoHashRaw !== "undefined" ? infoHashRaw : null;
+
+        // Coerce key — JSON/serde may deliver number or numeric string
+        const rawKey = item.torrentKey ?? item.torrent_key;
         const torrentKey =
-          typeof item.torrentKey === "number"
-            ? item.torrentKey
-            : typeof item.torrent_key === "number"
-              ? item.torrent_key
+          typeof rawKey === "number" && Number.isFinite(rawKey)
+            ? rawKey
+            : typeof rawKey === "string" && /^\d+$/.test(rawKey)
+              ? Number(rawKey)
               : null;
 
         let idx = -1;
-        if (infoHash) {
-          idx = next.findIndex((t) => t.infoHash === infoHash);
-        }
-        if (idx === -1 && torrentKey != null) {
+        if (torrentKey != null) {
           idx = next.findIndex((t) => t.torrentKey === torrentKey);
         }
+        if (idx === -1 && infoHash) {
+          idx = next.findIndex((t) => t.infoHash === infoHash);
+        }
+        // Match provisional pending-* rows by torrentKey only (already tried)
 
         const progressFrac =
           typeof item.progress === "number"
             ? item.progress > 1
               ? item.progress / 100
               : item.progress
-            : 0;
-        const downloadSpeed = Number(item.downloadSpeed ?? 0);
-        const uploadSpeed = Number(item.uploadSpeed ?? 0);
-        const numPeers = Number(item.numPeers ?? 0);
+            : idx >= 0
+              ? (next[idx].progress?.progress ?? 0)
+              : 0;
+        const downloadSpeed = Number(
+          item.downloadSpeed ?? item.download_speed ?? 0,
+        );
+        const uploadSpeed = Number(item.uploadSpeed ?? item.upload_speed ?? 0);
+        const numPeers = Number(item.numPeers ?? item.num_peers ?? 0);
         const downloaded = Number(item.downloaded ?? 0);
         const uploaded = Number(item.uploaded ?? 0);
-        const length = Number(item.length ?? 0);
+        const length = Number(
+          item.length ?? (idx >= 0 ? next[idx].progress?.length : 0) ?? 0,
+        );
+        const ready =
+          typeof item.ready === "boolean" ? item.ready : undefined;
+        const incomingName =
+          typeof item.name === "string" && item.name ? item.name : null;
+        const prevName = idx >= 0 ? next[idx].name : null;
         const name =
-          typeof item.name === "string" && item.name
-            ? item.name
-            : infoHash
-              ? infoHash.slice(0, 8)
-              : "Torrent";
+          incomingName ||
+          (prevName &&
+          prevName !== "Unknown" &&
+          prevName !== "Fetching metadata…"
+            ? prevName
+            : null) ||
+          (infoHash ? infoHash.slice(0, 10) : "Torrent");
         const status = item.status
           ? coerceStatus(item.status)
-          : statusFromProgress(progressFrac, downloadSpeed);
+          : statusFromProgress(progressFrac, downloadSpeed, {
+              ready,
+              numPeers,
+            });
 
         const summary: TorrentSummary = {
-          torrentKey: torrentKey ?? nextTorrentKey++,
-          infoHash: infoHash ?? `pending-${torrentKey ?? Date.now()}`,
+          torrentKey:
+            torrentKey ??
+            (idx >= 0 ? next[idx].torrentKey : nextTorrentKey++),
+          infoHash:
+            infoHash ??
+            (idx >= 0 ? next[idx].infoHash : `pending-${torrentKey ?? Date.now()}`),
           name,
           status,
           progress: {
@@ -744,7 +848,9 @@ export const useAppStore = create<AppState>((set, get) => ({
             uploaded,
             length,
           },
-          gradient: gradientForHash(infoHash ?? name),
+          gradient: gradientForHash(
+            infoHash ?? (idx >= 0 ? next[idx].infoHash : name),
+          ),
           mock: false,
         };
 

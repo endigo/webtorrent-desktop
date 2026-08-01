@@ -12,6 +12,7 @@ import {
   onTorrentDone,
   onTorrentError,
   onTorrentMetadata,
+  onTorrentParsed,
   onTorrentProgress,
   onTorrentReady,
   setWindowTitle,
@@ -115,6 +116,17 @@ function useShellBridge() {
           }
         }),
         onTorrentProgress((payload) => applyProgressEvent(payload)),
+        onTorrentParsed((payload) => {
+          // Early: { torrentKey, infoHash, magnetURI }
+          applyProgressEvent({
+            torrentKey: payload.torrentKey,
+            infoHash: payload.infoHash,
+            name:
+              typeof payload.magnetURI === "string"
+                ? undefined
+                : payload.name,
+          });
+        }),
         onTorrentMetadata((payload) => {
           // Engine: { torrentKey, info: { name, infoHash, ... } }
           const info =
@@ -124,6 +136,8 @@ function useShellBridge() {
           applyProgressEvent({
             ...info,
             torrentKey: payload.torrentKey ?? info.torrentKey,
+            // Keep progress fields if this event has none
+            ready: false,
           });
           const name =
             typeof info.name === "string"
@@ -141,6 +155,7 @@ function useShellBridge() {
           applyProgressEvent({
             ...info,
             torrentKey: payload.torrentKey ?? info.torrentKey,
+            ready: true,
           });
         }),
         onTorrentDone((payload) => {

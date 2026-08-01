@@ -81,9 +81,11 @@ export interface TorrentSelectFilesArgs {
 
 /** Engine list item (flexible for W2 shape) */
 export interface EngineTorrent {
-  torrentKey?: number;
-  infoHash: string;
-  name: string;
+  torrentKey?: number | string;
+  /** Present on torrent_add response only */
+  torrentId?: string;
+  infoHash?: string;
+  name?: string;
   status?: string;
   progress?: number;
   downloadSpeed?: number;
@@ -92,6 +94,7 @@ export interface EngineTorrent {
   downloaded?: number;
   uploaded?: number;
   length?: number;
+  ready?: boolean;
   [key: string]: unknown;
 }
 
@@ -442,6 +445,7 @@ export const EVENTS = {
   dispatch: "app://dispatch",
   progress: "torrent://progress",
   metadata: "torrent://metadata",
+  parsed: "torrent://parsed",
   done: "torrent://done",
   torrentReady: "torrent://ready",
   torrentError: "torrent://error",
@@ -619,6 +623,22 @@ export async function onTorrentMetadata(
   }
   try {
     return await listen<Record<string, unknown>>(EVENTS.metadata, (event) => {
+      handler(event.payload ?? {});
+    });
+  } catch {
+    return () => {};
+  }
+}
+
+/** Early info-hash / magnet after parse (before full metadata). */
+export async function onTorrentParsed(
+  handler: (payload: Record<string, unknown>) => void,
+): Promise<UnlistenFn> {
+  if (!isTauriRuntime()) {
+    return () => {};
+  }
+  try {
+    return await listen<Record<string, unknown>>(EVENTS.parsed, (event) => {
       handler(event.payload ?? {});
     });
   } catch {

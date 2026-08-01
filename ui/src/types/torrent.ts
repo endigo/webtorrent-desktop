@@ -53,12 +53,18 @@ export function coerceStatus(raw: unknown): TorrentStatus {
 export function statusFromProgress(
   progress: number | null | undefined,
   downloadSpeed = 0,
+  opts?: { ready?: boolean; numPeers?: number },
 ): TorrentStatus {
   if (progress != null && progress >= 1) {
     return downloadSpeed > 0 ? "seeding" : "done";
   }
-  if (downloadSpeed === 0 && (progress == null || progress === 0)) {
-    return "paused";
+  // Actively transferring (or have peers) → downloading even at 0%
+  if (downloadSpeed > 0 || (opts?.numPeers ?? 0) > 0) {
+    return "downloading";
+  }
+  // Local add before metadata / first bytes — not "paused"
+  if (progress == null || progress === 0) {
+    return opts?.ready === false || opts?.ready == null ? "queued" : "paused";
   }
   return "downloading";
 }
