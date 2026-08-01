@@ -67,6 +67,7 @@ export function PlayerPage() {
   const torrents = useAppStore((s) => s.torrents);
   const selectedInfoHash = useAppStore((s) => s.selectedInfoHash);
   const navigate = useAppStore((s) => s.navigate);
+  const setTorrentPoster = useAppStore((s) => s.setTorrentPoster);
 
   const torrent =
     torrents.find((t) => t.infoHash === selectedInfoHash) ??
@@ -178,6 +179,69 @@ export function PlayerPage() {
     return () => window.clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only re-autoplay when URL changes
   }, [streamUrl]);
+
+  // Capture one video frame as list poster once we can paint a frame
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !streamUrl || !torrent) return;
+    if (torrent.posterUrl) return; // already have one
+
+    let captured = false;
+    const capture = () => {
+      if (captured) return;
+      if (video.videoWidth < 16 || video.videoHeight < 16) return;
+      try {
+        const maxW = 640;
+        const scale = Math.min(1, maxW / video.videoWidth);
+        const w = Math.round(video.videoWidth * scale);
+        const h = Math.round(video.videoHeight * scale);
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+        ctx.drawImage(video, 0, 0, w, h);
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.72);
+        if (dataUrl.length < 100) return;
+        captured = true;
+        setTorrentPoster(
+          { infoHash: torrent.infoHash, torrentKey: torrent.torrentKey },
+          dataUrl,
+        );
+      } catch (err) {
+        console.warn("poster capture failed", err);
+      }
+    };
+
+    const onSeeked = () => {
+      capture();
+      video.removeEventListener("seeked", onSeeked);
+    };
+
+    const onReady = () => {
+      // Seek a few seconds in for a more interesting frame
+      try {
+        const t = Math.min(
+          Math.max((video.duration || 60) * 0.03, 1),
+          30,
+        );
+        if (Number.isFinite(t) && t > 0) {
+          video.addEventListener("seeked", onSeeked);
+          video.currentTime = t;
+        } else {
+          capture();
+        }
+      } catch {
+        capture();
+      }
+    };
+
+    video.addEventListener("loadeddata", onReady, { once: true });
+    return () => {
+      video.removeEventListener("loadeddata", onReady);
+      video.removeEventListener("seeked", onSeeked);
+    };
+  }, [streamUrl, torrent?.infoHash, torrent?.torrentKey, torrent?.posterUrl, setTorrentPoster]);
 
   const togglePlay = useCallback(() => {
     const video = videoRef.current;

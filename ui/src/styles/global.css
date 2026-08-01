@@ -237,6 +237,11 @@ body {
   animation: fadein 0.4s;
 }
 
+/* Poster photo behind the dark gradient overlay (set via inline style) */
+.torrent.has-poster {
+  background-color: #1a1a1a;
+}
+
 .torrent:not(:last-child) {
   border-bottom: 1px solid #282828;
 }

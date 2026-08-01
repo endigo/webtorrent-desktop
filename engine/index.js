@@ -16,10 +16,12 @@
  *   { "event": "torrent://ready", "payload": { ... } }
  *   { "event": "torrent://error", "payload": { ... } }
  *   { "event": "torrent://server", "payload": { ... } }
+ *   { "event": "torrent://poster", "payload": { torrentKey, infoHash, dataUrl } }
  *
  * Methods:
  *   ping, torrent_add, torrent_remove, torrent_create,
- *   torrent_select_files, stream_start, stream_stop, set_global_trackers
+ *   torrent_select_files, stream_start, stream_stop, set_global_trackers,
+ *   generate_poster
  */
 
 'use strict'
@@ -56,6 +58,11 @@ const VIDEO_EXTS = new Set([
 const AUDIO_EXTS = new Set([
   '.mp3', '.m4a', '.aac', '.flac', '.ogg', '.wav', '.opus', '.wma'
 ])
+const IMAGE_EXTS = new Set([
+  '.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'
+])
+/** infoHashes we've already emitted a poster for */
+const posterDone = new Set()
 
 // ---- I/O helpers -----------------------------------------------------------
 
@@ -219,6 +226,23 @@ const methods = {
   },
 
   /**
+   * Force poster generation for a torrent (image cover or video frame via ffmpeg).
+   * @param {{ infoHash?: string, torrentKey?: number|string }} params
+   */
+  async generate_poster (params) {
+    const torrent = resolveTorrent(params)
+    if (!torrent) throw new Error('torrent not found')
+    posterDone.delete(torrent.infoHash)
+    const dataUrl = await tryGeneratePoster(torrent, true)
+    if (!dataUrl) throw new Error('no poster available yet')
+    return {
+      torrentKey: torrent.key,
+      infoHash: torrent.infoHash,
+      dataUrl
+    }
+  },
+
+  /**
    * @param {{ trackers: string[] }} params
    */
   set_global_trackers (params) {
@@ -299,6 +323,207 @@ function prioritizeFile (torrent, fileIndex) {
   }
 }
 
+// ---- Posters ---------------------------------------------------------------
+
+function throttle (fn, ms) {
+  let last = 0
+  let pending = null
+  return function throttled (...args) {
+    const now = Date.now()
+    if (now - last >= ms) {
+      last = now
+      return fn.apply(this, args)
+    }
+    if (pending) clearTimeout(pending)
+    pending = setTimeout(() => {
+      last = Date.now()
+      pending = null
+      fn.apply(this, args)
+    }, ms - (now - last))
+  }
+}
+
+function schedulePoster (torrent, force) {
+  if (!torrent || !torrent.infoHash) return
+  if (!force && posterDone.has(torrent.infoHash)) return
+  tryGeneratePoster(torrent, force).then((dataUrl) => {
+    if (!dataUrl) return
+    posterDone.add(torrent.infoHash)
+    emit('torrent://poster', {
+      torrentKey: torrent.key,
+      infoHash: torrent.infoHash,
+      dataUrl
+    })
+  }).catch((err) => {
+    process.stderr.write(`poster: ${err.message}\n`)
+  })
+}
+
+/**
+ * Prefer poster/cover images in the torrent; else ffmpeg frame from video if done.
+ * Returns a data: URL string or null.
+ */
+async function tryGeneratePoster (torrent, allowVideo) {
+  if (!torrent.files || torrent.files.length === 0) return null
+
+  // 1) Explicit poster.* file
+  const posterNamed = torrent.files.find((f) =>
+    /^poster\.(jpe?g|png|gif|webp)$/i.test(path.basename(f.name))
+  )
+  if (posterNamed) {
+    const url = await fileToDataUrl(posterNamed, torrent)
+    if (url) return url
+  }
+
+  // 2) Cover / folder / album art style images
+  const images = torrent.files.filter((f) => IMAGE_EXTS.has(extname(f.name)))
+  if (images.length > 0) {
+    const scored = images.map((file) => ({
+      file,
+      score: scoreCoverName(file.name) + Math.min(file.length / (100 * 1024), 20)
+    })).sort((a, b) => b.score - a.score)
+    for (const { file } of scored) {
+      const url = await fileToDataUrl(file, torrent)
+      if (url) return url
+    }
+  }
+
+  // 3) Video frame via ffmpeg once the file is fully on disk
+  if (allowVideo) {
+    const videoIdx = pickPlayableFileIndex(torrent)
+    if (videoIdx >= 0 && VIDEO_EXTS.has(extname(torrent.files[videoIdx].name))) {
+      const url = await videoFrameDataUrl(torrent, videoIdx)
+      if (url) return url
+    }
+  }
+
+  return null
+}
+
+function scoreCoverName (name) {
+  const base = path.basename(name, path.extname(name)).toLowerCase()
+  if (base === 'poster' || base === 'cover' || base === 'folder' || base === 'front') return 100
+  if (base.includes('poster') || base.includes('cover') || base.includes('folder')) return 60
+  if (base.includes('thumb') || base.includes('artwork')) return 40
+  if (base.includes('back') || base.includes('spectrum')) return -20
+  return 0
+}
+
+/**
+ * Read a torrent file into a data URL once enough of it is available.
+ */
+function fileToDataUrl (file, torrent) {
+  return new Promise((resolve) => {
+    // Need a reasonable chunk — skip if almost nothing downloaded
+    if (file.downloaded != null && file.length > 0 && file.downloaded < Math.min(file.length, 4096)) {
+      return resolve(null)
+    }
+
+    // Prefer absolute path on disk when fully downloaded
+    const diskPath = path.join(torrent.path, file.path)
+    if (file.progress >= 0.99 && fs.existsSync(diskPath)) {
+      try {
+        const buf = fs.readFileSync(diskPath)
+        if (buf.length > 0 && buf.length < 8 * 1024 * 1024) {
+          return resolve(bufferToDataUrl(buf, extname(file.name)))
+        }
+      } catch {
+        /* fall through to stream */
+      }
+    }
+
+    // Stream from WebTorrent (works for complete or buffered pieces)
+    try {
+      const chunks = []
+      let total = 0
+      const maxBytes = 4 * 1024 * 1024
+      const stream = file.createReadStream()
+      const timer = setTimeout(() => {
+        try { stream.destroy() } catch { /* ignore */ }
+        resolve(null)
+      }, 8000)
+
+      stream.on('data', (chunk) => {
+        total += chunk.length
+        if (total <= maxBytes) chunks.push(chunk)
+        if (total > maxBytes) {
+          try { stream.destroy() } catch { /* ignore */ }
+        }
+      })
+      stream.on('error', () => {
+        clearTimeout(timer)
+        resolve(null)
+      })
+      stream.on('end', () => {
+        clearTimeout(timer)
+        if (chunks.length === 0) return resolve(null)
+        const buf = Buffer.concat(chunks)
+        resolve(bufferToDataUrl(buf, extname(file.name)))
+      })
+    } catch {
+      resolve(null)
+    }
+  })
+}
+
+function bufferToDataUrl (buf, ext) {
+  const mime =
+    ext === '.png' ? 'image/png'
+      : ext === '.gif' ? 'image/gif'
+        : ext === '.webp' ? 'image/webp'
+          : 'image/jpeg'
+  return `data:${mime};base64,${buf.toString('base64')}`
+}
+
+/**
+ * Extract one JPEG frame with ffmpeg when available and the video is on disk.
+ */
+function videoFrameDataUrl (torrent, fileIndex) {
+  return new Promise((resolve) => {
+    const file = torrent.files[fileIndex]
+    if (!file) return resolve(null)
+    const diskPath = path.join(torrent.path, file.path)
+    if (!fs.existsSync(diskPath)) return resolve(null)
+
+    const { spawn } = require('child_process')
+    const ffmpeg = process.env.FFMPEG_PATH || 'ffmpeg'
+    const args = [
+      '-hide_banner', '-loglevel', 'error',
+      '-ss', '5',
+      '-i', diskPath,
+      '-frames:v', '1',
+      '-f', 'image2',
+      '-vcodec', 'mjpeg',
+      'pipe:1'
+    ]
+    let proc
+    try {
+      proc = spawn(ffmpeg, args, { stdio: ['ignore', 'pipe', 'pipe'] })
+    } catch {
+      return resolve(null)
+    }
+
+    const chunks = []
+    const timer = setTimeout(() => {
+      try { proc.kill('SIGKILL') } catch { /* ignore */ }
+      resolve(null)
+    }, 12000)
+
+    proc.stdout.on('data', (c) => chunks.push(c))
+    proc.on('error', () => {
+      clearTimeout(timer)
+      resolve(null)
+    })
+    proc.on('close', (code) => {
+      clearTimeout(timer)
+      if (code !== 0 || chunks.length === 0) return resolve(null)
+      const buf = Buffer.concat(chunks)
+      if (buf.length < 100) return resolve(null)
+      resolve(bufferToDataUrl(buf, '.jpg'))
+    })
+  })
+}
+
 function attachTorrentEvents (torrent) {
   torrent.on('warning', (err) =>
     emit('torrent://error', { torrentKey: torrent.key, level: 'warning', message: err.message }))
@@ -314,17 +539,22 @@ function attachTorrentEvents (torrent) {
     const info = getTorrentInfo(torrent)
     emit('torrent://metadata', { torrentKey: torrent.key, info })
     updateTorrentProgress()
+    schedulePoster(torrent)
   })
   torrent.on('ready', () => {
     const info = getTorrentInfo(torrent)
     emit('torrent://ready', { torrentKey: torrent.key, info })
     updateTorrentProgress()
+    schedulePoster(torrent)
   })
   torrent.on('done', () => {
     const info = getTorrentInfo(torrent)
     emit('torrent://done', { torrentKey: torrent.key, info })
     updateTorrentProgress()
+    schedulePoster(torrent, true)
   })
+  // Retry poster as pieces land (images/video frames may become readable)
+  torrent.on('download', throttle(() => schedulePoster(torrent), 5000))
 }
 
 function getTorrentInfo (torrent) {

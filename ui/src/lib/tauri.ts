@@ -458,6 +458,7 @@ export const EVENTS = {
   torrentReady: "torrent://ready",
   torrentError: "torrent://error",
   torrentServer: "torrent://server",
+  poster: "torrent://poster",
 } as const;
 
 /**
@@ -647,6 +648,30 @@ export async function onTorrentParsed(
   }
   try {
     return await listen<Record<string, unknown>>(EVENTS.parsed, (event) => {
+      handler(event.payload ?? {});
+    });
+  } catch {
+    return () => {};
+  }
+}
+
+/** Poster / cover image ready: { torrentKey, infoHash, dataUrl } */
+export async function onTorrentPoster(
+  handler: (payload: {
+    torrentKey?: number | string;
+    infoHash?: string;
+    dataUrl?: string;
+  }) => void,
+): Promise<UnlistenFn> {
+  if (!isTauriRuntime()) {
+    return () => {};
+  }
+  try {
+    return await listen<{
+      torrentKey?: number | string;
+      infoHash?: string;
+      dataUrl?: string;
+    }>(EVENTS.poster, (event) => {
       handler(event.payload ?? {});
     });
   } catch {

@@ -256,6 +256,11 @@ interface AppState {
   handleDispatch: (action: string, args: unknown[]) => void;
   upsertTorrent: (summary: TorrentSummary) => void;
   applyProgressEvent: (payload: Record<string, unknown>) => void;
+  /** Set or update poster image for a torrent (data URL). */
+  setTorrentPoster: (
+    match: { infoHash?: string; torrentKey?: number },
+    posterUrl: string,
+  ) => void;
 }
 
 function formatOpenResult(label: string, result: OpenResult): string {
@@ -734,7 +739,30 @@ export const useAppStore = create<AppState>((set, get) => ({
             : prev.name,
         torrentKey: prev.torrentKey || summary.torrentKey,
         gradient: prev.gradient ?? summary.gradient,
+        // Never clobber an existing poster with empty
+        posterUrl: summary.posterUrl || prev.posterUrl,
       };
+      return { torrents: next };
+    });
+  },
+
+  setTorrentPoster: (match, posterUrl) => {
+    if (!posterUrl) return;
+    set((state) => {
+      const idx = state.torrents.findIndex((t) => {
+        if (match.infoHash && t.infoHash === match.infoHash) return true;
+        if (
+          match.torrentKey != null &&
+          t.torrentKey === match.torrentKey
+        ) {
+          return true;
+        }
+        return false;
+      });
+      if (idx === -1) return state;
+      if (state.torrents[idx].posterUrl === posterUrl) return state;
+      const next = state.torrents.slice();
+      next[idx] = { ...next[idx], posterUrl };
       return { torrents: next };
     });
   },

@@ -13,6 +13,7 @@ import {
   onTorrentError,
   onTorrentMetadata,
   onTorrentParsed,
+  onTorrentPoster,
   onTorrentProgress,
   onTorrentReady,
   setWindowTitle,
@@ -77,6 +78,7 @@ function useShellBridge() {
   const probeEngine = useAppStore((s) => s.probeEngine);
   const handleDispatch = useAppStore((s) => s.handleDispatch);
   const applyProgressEvent = useAppStore((s) => s.applyProgressEvent);
+  const setTorrentPoster = useAppStore((s) => s.setTorrentPoster);
   const setStatusMessage = useAppStore((s) => s.setStatusMessage);
   const handleAddMagnet = useAppStore((s) => s.handleAddMagnet);
   const setCreateTorrentPaths = useAppStore((s) => s.setCreateTorrentPaths);
@@ -116,6 +118,26 @@ function useShellBridge() {
           }
         }),
         onTorrentProgress((payload) => applyProgressEvent(payload)),
+        onTorrentPoster((payload) => {
+          if (typeof payload.dataUrl !== "string" || !payload.dataUrl) return;
+          const torrentKey =
+            typeof payload.torrentKey === "number"
+              ? payload.torrentKey
+              : typeof payload.torrentKey === "string" &&
+                  /^\d+$/.test(payload.torrentKey)
+                ? Number(payload.torrentKey)
+                : undefined;
+          setTorrentPoster(
+            {
+              infoHash:
+                typeof payload.infoHash === "string"
+                  ? payload.infoHash
+                  : undefined,
+              torrentKey,
+            },
+            payload.dataUrl,
+          );
+        }),
         onTorrentParsed((payload) => {
           // Early: { torrentKey, infoHash, magnetURI }
           applyProgressEvent({

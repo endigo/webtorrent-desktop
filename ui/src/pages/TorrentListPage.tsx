@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useState, type CSSProperties } from "react";
 import { useAppStore } from "../store/useAppStore";
 import type { TorrentSummary } from "../types/torrent";
 
@@ -57,11 +57,25 @@ function TorrentRow({ torrent }: { torrent: TorrentSummary }) {
   const prog = torrent.progress;
   const pct = prog ? Math.floor(prog.progress * 100) : 0;
 
+  // Poster (when available) + dark gradient overlay for readable text, else solid gradient
+  const rowStyle: CSSProperties | undefined = torrent.posterUrl
+    ? {
+        backgroundImage: [
+          "linear-gradient(to bottom, rgba(0,0,0,0.45) 0%, rgba(0,0,0,0.55) 100%)",
+          `url(${JSON.stringify(torrent.posterUrl)})`,
+        ].join(", "),
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+      }
+    : torrent.gradient
+      ? { background: torrent.gradient }
+      : undefined;
+
   return (
     <div
       id={torrent.testID ? `torrent-${torrent.testID}` : undefined}
-      className={`torrent${selected ? " selected" : ""}`}
-      style={torrent.gradient ? { background: torrent.gradient } : undefined}
+      className={`torrent${selected ? " selected" : ""}${torrent.posterUrl ? " has-poster" : ""}`}
+      style={rowStyle}
       onClick={() => selectTorrent(torrent.infoHash)}
       role="button"
       tabIndex={0}

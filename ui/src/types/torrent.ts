@@ -25,6 +25,8 @@ export interface TorrentSummary {
   progress: TorrentProgress | null;
   /** Optional gradient / poster style hint for list cards */
   gradient?: string;
+  /** data: URL or http URL for poster / cover / captured frame */
+  posterUrl?: string;
   testID?: string;
   /** True when this row came from mock seed data, not the engine */
   mock?: boolean;
