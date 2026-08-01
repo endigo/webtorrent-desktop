@@ -404,7 +404,7 @@ export async function torrentList(): Promise<InvokeResult<EngineTorrent[]>> {
 }
 
 export interface StreamStartResult {
-  /** Base HTTP origin, e.g. http://localhost:12345 (files at /0, /1, …) */
+  /** Base HTTP origin, e.g. http://127.0.0.1:12345 (files at /0, /1, …) */
   localURL?: string;
   localUrl?: string;
   networkURL?: string;
@@ -412,6 +412,9 @@ export interface StreamStartResult {
   port?: number;
   infoHash?: string;
   torrentKey?: number | string;
+  /** Index of the media file chosen for playback */
+  fileIndex?: number;
+  fileName?: string;
 }
 
 export async function streamStart(
@@ -419,8 +422,13 @@ export async function streamStart(
   torrentKey?: number,
 ): Promise<InvokeResult<StreamStartResult | string | null>> {
   // Rust: stream_start(info_hash?, torrent_key?) → JS: infoHash, torrentKey
+  // Prefer torrentKey when infoHash is provisional (pending-*)
+  const hash =
+    infoHash && !infoHash.startsWith("pending-") && infoHash !== "undefined"
+      ? infoHash
+      : null;
   return tryInvokeAliases(["stream_start"], {
-    infoHash: infoHash,
+    infoHash: hash,
     torrentKey: torrentKey ?? null,
   });
 }

@@ -36,13 +36,31 @@ function formatTime(seconds: number): string {
   return `${m}:${pad(s)}`;
 }
 
-/** Normalize stream_start payload into a playable base URL. */
-function extractStreamBase(
-  value: { url?: string; localURL?: string; localUrl?: string } | string | null | undefined,
-): string | null {
+/** Normalize stream_start payload into a playable base URL + file index. */
+function extractStream(
+  value:
+    | {
+        url?: string;
+        localURL?: string;
+        localUrl?: string;
+        fileIndex?: number;
+        fileName?: string;
+      }
+    | string
+    | null
+    | undefined,
+): { base: string; fileIndex: number; fileName?: string } | null {
   if (value == null) return null;
-  if (typeof value === "string") return value || null;
-  return value.localURL ?? value.localUrl ?? value.url ?? null;
+  if (typeof value === "string") {
+    return value ? { base: value, fileIndex: 0 } : null;
+  }
+  const base = value.localURL ?? value.localUrl ?? value.url ?? null;
+  if (!base) return null;
+  const fileIndex =
+    typeof value.fileIndex === "number" && value.fileIndex >= 0
+      ? value.fileIndex
+      : 0;
+  return { base, fileIndex, fileName: value.fileName };
 }
 
 export function PlayerPage() {
@@ -64,11 +82,12 @@ export function PlayerPage() {
   const [volume, setVolume] = useState(1);
 
   // Start HTTP stream when a real (non-mock) torrent is selected.
+  // Works while still downloading — WebTorrent serve range-requests.
   useEffect(() => {
     let cancelled = false;
 
     async function start() {
-      if (!torrent || torrent.mock || !torrent.infoHash) {
+      if (!torrent || torrent.mock) {
         setStreamUrl(null);
         setStatus(
           torrent?.mock
@@ -78,8 +97,28 @@ export function PlayerPage() {
         return;
       }
 
+      // Prefer torrentKey; infoHash may still be pending-* before metadata
+      const canResolve =
+        torrent.torrentKey != null ||
+        (torrent.infoHash && !torrent.infoHash.startsWith("pending-"));
+      if (!canResolve) {
+        setStreamUrl(null);
+        setStatus("Waiting for torrent metadata…");
+        return;
+      }
+
       setStatus("Starting stream…");
-      const result = await streamStart(torrent.infoHash, torrent.torrentKey);
+      setStreamUrl(null);
+      setCurrentTime(0);
+      setDuration(0);
+      setPlaying(false);
+
+      const result = await streamStart(
+        torrent.infoHash?.startsWith("pending-")
+          ? ""
+          : torrent.infoHash || "",
+        torrent.torrentKey,
+      );
       if (cancelled) return;
 
       if (!result.ok) {
@@ -88,18 +127,27 @@ export function PlayerPage() {
         return;
       }
 
-      const base = extractStreamBase(result.value as { localURL?: string });
-      if (!base) {
+      const extracted = extractStream(
+        result.value as {
+          localURL?: string;
+          fileIndex?: number;
+          fileName?: string;
+        },
+      );
+      if (!extracted) {
         setStreamUrl(null);
         setStatus("stream_start returned no URL");
         return;
       }
 
-      // WebTorrent createServer serves file index N at /N
-      const fileIndex = 0;
-      const url = `${base.replace(/\/$/, "")}/${fileIndex}`;
+      // WebTorrent createServer serves file index N at /N — stream while downloading
+      const url = `${extracted.base.replace(/\/$/, "")}/${extracted.fileIndex}`;
       setStreamUrl(url);
-      setStatus("");
+      setStatus(
+        extracted.fileName
+          ? `Streaming ${extracted.fileName} (while downloading)`
+          : "Streaming while downloading",
+      );
     }
 
     void start();
@@ -110,11 +158,43 @@ export function PlayerPage() {
     };
   }, [torrent?.infoHash, torrent?.torrentKey, torrent?.mock]);
 
+  // Autoplay when the stream URL is ready (user already clicked Play on the list)
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !streamUrl) return;
+    video.volume = volume;
+    const tryPlay = () => {
+      void video
+        .play()
+        .then(() => setPlaying(true))
+        .catch((err) => {
+          setPlaying(false);
+          // Autoplay blocked or media not ready yet — user can press play
+          console.warn("autoplay failed", err);
+        });
+    };
+    // Small delay so the element mounts with src
+    const id = window.setTimeout(tryPlay, 50);
+    return () => window.clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only re-autoplay when URL changes
+  }, [streamUrl]);
+
   const togglePlay = useCallback(() => {
     const video = videoRef.current;
     if (!video || !streamUrl) return;
     if (video.paused) {
-      void video.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
+      void video
+        .play()
+        .then(() => {
+          setPlaying(true);
+          setStatus("");
+        })
+        .catch((err) => {
+          setPlaying(false);
+          setStatus(
+            err instanceof Error ? err.message : "Playback failed — try again",
+          );
+        });
     } else {
       video.pause();
       setPlaying(false);
@@ -153,11 +233,37 @@ export function PlayerPage() {
             className="player-video"
             src={streamUrl}
             playsInline
+            preload="auto"
             onTimeUpdate={onTimeUpdate}
             onLoadedMetadata={onTimeUpdate}
+            onCanPlay={() => {
+              // Media has enough data to start — clear "starting" status
+              setStatus((s) =>
+                s.startsWith("Starting") || s.startsWith("Streaming")
+                  ? ""
+                  : s,
+              );
+            }}
+            onWaiting={() => setStatus("Buffering…")}
+            onPlaying={() => {
+              setPlaying(true);
+              setStatus("");
+            }}
             onPlay={() => setPlaying(true)}
             onPause={() => setPlaying(false)}
             onEnded={() => setPlaying(false)}
+            onError={() => {
+              const mediaError = videoRef.current?.error;
+              const code = mediaError?.code;
+              const msg =
+                code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED
+                  ? "Format not supported or stream not ready yet"
+                  : code === MediaError.MEDIA_ERR_NETWORK
+                    ? "Network error loading stream (is the engine running?)"
+                    : "Playback error — wait for more data or try again";
+              setStatus(msg);
+              setPlaying(false);
+            }}
             onClick={togglePlay}
           />
         ) : (

@@ -46,7 +46,16 @@ const PEER_ID = Buffer.from(VERSION_PREFIX + crypto.randomBytes(9).toString('bas
 
 const client = new WebTorrent({ peerId: PEER_ID })
 let server = null
+/** @type {string|null} infoHash the HTTP stream server is bound to */
+let serverInfoHash = null
 let prevProgress = null
+
+const VIDEO_EXTS = new Set([
+  '.mp4', '.m4v', '.webm', '.mkv', '.mov', '.avi', '.wmv', '.flv', '.ts', '.m2ts', '.ogv'
+])
+const AUDIO_EXTS = new Set([
+  '.mp3', '.m4a', '.aac', '.flac', '.ogg', '.wav', '.opus', '.wma'
+])
 
 // ---- I/O helpers -----------------------------------------------------------
 
@@ -154,15 +163,54 @@ const methods = {
   },
 
   /**
-   * @param {{ infoHash?: string, torrentKey?: number|string }} params
+   * Start (or reuse) the HTTP stream server for progressive playback while
+   * the torrent is still downloading. Returns localURL + fileIndex of the
+   * first playable media file.
+   *
+   * @param {{ infoHash?: string, torrentKey?: number|string, fileIndex?: number }} params
    */
   async stream_start (params) {
     const torrent = resolveTorrent(params)
-    if (!torrent) throw new Error('torrent not found')
-    if (!torrent.ready) {
-      await new Promise((resolve) => torrent.once('ready', resolve))
+    if (!torrent) {
+      throw new Error(
+        `torrent not found (infoHash=${params && params.infoHash}, key=${params && params.torrentKey})`
+      )
     }
-    return startServerAsync(torrent)
+    // Need metadata/files — wait if still fetching (streaming works before full download)
+    if (!torrent.ready) {
+      await new Promise((resolve, reject) => {
+        const onReady = () => {
+          cleanup()
+          resolve()
+        }
+        const onError = (err) => {
+          cleanup()
+          reject(err)
+        }
+        const cleanup = () => {
+          torrent.removeListener('ready', onReady)
+          torrent.removeListener('error', onError)
+        }
+        torrent.once('ready', onReady)
+        torrent.once('error', onError)
+      })
+    }
+
+    const fileIndex =
+      params && Number.isInteger(params.fileIndex)
+        ? params.fileIndex
+        : pickPlayableFileIndex(torrent)
+    if (fileIndex < 0) {
+      throw new Error('no playable video/audio file in torrent')
+    }
+
+    // Prioritize the file being streamed so download focuses on playback
+    prioritizeFile(torrent, fileIndex)
+
+    const info = await startServerAsync(torrent)
+    info.fileIndex = fileIndex
+    info.fileName = torrent.files[fileIndex] && torrent.files[fileIndex].name
+    return info
   },
 
   stream_stop () {
@@ -183,11 +231,72 @@ const methods = {
 
 function resolveTorrent (params) {
   if (!params) return null
-  if (params.infoHash) return client.get(params.infoHash)
+  // Prefer real info-hash, but fall back to torrentKey when UI still has pending-*
+  if (params.infoHash && typeof params.infoHash === 'string') {
+    const hash = params.infoHash
+    if (!hash.startsWith('pending-') && hash !== 'undefined') {
+      const byHash = client.get(hash)
+      if (byHash) return byHash
+    }
+  }
   if (params.torrentKey != null) {
-    return client.torrents.find((t) => t.key === params.torrentKey) || null
+    const key = params.torrentKey
+    const byKey = client.torrents.find(
+      (t) => t.key === key || String(t.key) === String(key)
+    )
+    if (byKey) return byKey
+  }
+  // Last resort: infoHash lookup even if weird (client.get may still match)
+  if (params.infoHash) {
+    return client.get(params.infoHash) || null
   }
   return null
+}
+
+function extname (name) {
+  const i = String(name || '').lastIndexOf('.')
+  return i >= 0 ? String(name).slice(i).toLowerCase() : ''
+}
+
+function isPlayableFile (file) {
+  const ext = extname(file && file.name)
+  return VIDEO_EXTS.has(ext) || AUDIO_EXTS.has(ext)
+}
+
+/** First video, else first audio, else 0 if any files. */
+function pickPlayableFileIndex (torrent) {
+  if (!torrent.files || torrent.files.length === 0) return -1
+  const video = torrent.files.findIndex((f) => VIDEO_EXTS.has(extname(f.name)))
+  if (video >= 0) return video
+  const audio = torrent.files.findIndex((f) => AUDIO_EXTS.has(extname(f.name)))
+  if (audio >= 0) return audio
+  // Fallback: largest file (often the main video without a clear extension)
+  let best = 0
+  for (let i = 1; i < torrent.files.length; i++) {
+    if (torrent.files[i].length > torrent.files[best].length) best = i
+  }
+  return best
+}
+
+/**
+ * Select the streamed file and give it high priority so pieces arrive in
+ * roughly sequential order while the rest of the torrent continues.
+ */
+function prioritizeFile (torrent, fileIndex) {
+  if (!torrent.files || !torrent.files[fileIndex]) return
+  try {
+    // Keep all previously selected files selected; boost the one we play
+    const file = torrent.files[fileIndex]
+    file.select()
+    // Prefer early pieces for smooth start (WebTorrent supports critical)
+    if (typeof file._startPiece === 'number' && typeof torrent.critical === 'function') {
+      const start = file._startPiece
+      const end = Math.min(file._endPiece, start + 8)
+      torrent.critical(start, end)
+    }
+  } catch (err) {
+    process.stderr.write(`prioritizeFile: ${err.message}\n`)
+  }
 }
 
 function attachTorrentEvents (torrent) {
@@ -256,7 +365,8 @@ function selectFiles (torrent, selections) {
 
 function startServerAsync (torrent) {
   return new Promise((resolve, reject) => {
-    if (server) {
+    // Reuse only if the server already belongs to this torrent
+    if (server && serverInfoHash === torrent.infoHash) {
       try {
         const port = server.address().port
         const info = serverInfo(torrent, port)
@@ -267,13 +377,18 @@ function startServerAsync (torrent) {
       }
     }
 
+    // Different torrent (or broken server) — tear down and recreate
+    if (server) stopServer()
+
     try {
+      // createServer enables range requests → progressive play while downloading
       server = torrent.createServer()
     } catch (err) {
       return reject(err)
     }
 
-    server.listen(0, () => {
+    serverInfoHash = torrent.infoHash
+    server.listen(0, '127.0.0.1', () => {
       try {
         const port = server.address().port
         const info = serverInfo(torrent, port)
@@ -283,7 +398,10 @@ function startServerAsync (torrent) {
         reject(err)
       }
     })
-    server.on('error', reject)
+    server.on('error', (err) => {
+      stopServer()
+      reject(err)
+    })
   })
 }
 
@@ -292,7 +410,7 @@ function serverInfo (torrent, port) {
   return {
     torrentKey: torrent.key,
     infoHash: torrent.infoHash,
-    localURL: 'http://localhost' + urlSuffix,
+    localURL: 'http://127.0.0.1' + urlSuffix,
     networkURL: 'http://' + networkAddress() + urlSuffix,
     networkAddress: networkAddress(),
     port
@@ -307,6 +425,7 @@ function stopServer () {
     /* ignore */
   }
   server = null
+  serverInfoHash = null
 }
 
 function updateTorrentProgress () {
