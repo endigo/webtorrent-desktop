@@ -109,8 +109,18 @@ const methods = {
       throw new Error('torrent_add requires torrentKey and torrentId')
     }
 
+    // Resolve ~/… so resume always hits the same folder on disk.
+    // WebTorrent verifies existing pieces there and continues (does not start at 0%).
+    const resolvedPath = resolveDownloadPath(downloadPath)
+    try {
+      fs.mkdirSync(resolvedPath, { recursive: true })
+    } catch (err) {
+      process.stderr.write(`mkdir download path: ${err.message}\n`)
+    }
+
     const torrent = client.add(torrentId, {
-      path: downloadPath || path.join(os.homedir(), 'Downloads')
+      path: resolvedPath
+      // default: skipVerify false → hash-check existing files and resume
     })
     torrent.key = torrentKey
     attachTorrentEvents(torrent)
@@ -122,7 +132,8 @@ const methods = {
       }
     })
 
-    return { torrentKey, torrentId }
+    // path is absolute — UI persists it so the next launch resumes the same folder
+    return { torrentKey, torrentId, path: resolvedPath }
   },
 
   /**
@@ -280,6 +291,20 @@ function resolveTorrent (params) {
 function extname (name) {
   const i = String(name || '').lastIndexOf('.')
   return i >= 0 ? String(name).slice(i).toLowerCase() : ''
+}
+
+/** Expand ~ and default to ~/Downloads (absolute). */
+function resolveDownloadPath (p) {
+  const home = os.homedir()
+  if (!p || typeof p !== 'string' || !p.trim()) {
+    return path.join(home, 'Downloads')
+  }
+  const trimmed = p.trim()
+  if (trimmed === '~') return home
+  if (trimmed.startsWith('~/') || trimmed.startsWith('~\\')) {
+    return path.join(home, trimmed.slice(2))
+  }
+  return path.resolve(trimmed)
 }
 
 function isPlayableFile (file) {

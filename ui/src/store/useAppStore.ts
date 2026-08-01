@@ -436,19 +436,22 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
 
     const torrentKey = nextTorrentKey++;
-    const downloadPath = get().prefs.downloadPath;
-    const resolvedPath =
-      downloadPath && !downloadPath.startsWith("~/")
-        ? downloadPath
-        : undefined;
+    // Pass path as configured (incl. ~/…); engine expands and creates the dir.
+    // Same absolute path on restore → WebTorrent verifies existing bytes and resumes.
+    const downloadPath = get().prefs.downloadPath || "~/Downloads";
     const result = await torrentAdd({
       id,
       torrentKey,
-      path: resolvedPath,
+      path: downloadPath,
     });
     if (result.ok) {
-      // Engine add returns only { torrentKey, torrentId } — not full metadata.
+      // Engine add returns { torrentKey, torrentId, path? } — not full metadata.
       // Build a provisional row from the request; metadata/progress events fill in.
+      const enginePath =
+        result.value &&
+        typeof (result.value as { path?: string }).path === "string"
+          ? (result.value as { path: string }).path
+          : undefined;
       const summary = engineTorrentToSummary({
         ...(result.value ?? {}),
         torrentKey,
@@ -466,7 +469,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       summary.status = "queued";
       summary.torrentId = id;
       summary.magnetURI = id.startsWith("magnet:") ? id : undefined;
-      summary.downloadPath = resolvedPath;
+      summary.downloadPath = enginePath || downloadPath;
       get().upsertTorrent(summary);
       set({
         magnetInput: "",
@@ -854,20 +857,16 @@ export const useAppStore = create<AppState>((set, get) => ({
       statusMessage: `Restoring ${toRestore.length} torrent(s)…`,
     });
 
-    const downloadDefault = get().prefs.downloadPath;
+    const downloadDefault = get().prefs.downloadPath || "~/Downloads";
     let restored = 0;
     for (const s of toRestore) {
       const id = (s.magnetURI || s.torrentId || "").trim();
       if (!id) continue;
       const torrentKey = nextTorrentKey++;
-      const path =
-        s.downloadPath && !s.downloadPath.startsWith("~/")
-          ? s.downloadPath
-          : downloadDefault && !downloadDefault.startsWith("~/")
-            ? downloadDefault
-            : undefined;
+      // Prefer the path used last time so piece files on disk are found and resumed
+      const resumePath = s.downloadPath || downloadDefault;
 
-      const result = await torrentAdd({ id, torrentKey, path });
+      const result = await torrentAdd({ id, torrentKey, path: resumePath });
       if (!result.ok) {
         console.warn("restore failed", s.name, result.message);
         // Still show a row so the user sees it (can re-add manually)
@@ -879,13 +878,19 @@ export const useAppStore = create<AppState>((set, get) => ({
           progress: null,
           magnetURI: s.magnetURI,
           torrentId: id,
-          downloadPath: path,
+          downloadPath: resumePath,
           errorMessage: result.message,
           gradient: gradientForHash(s.infoHash),
           mock: false,
         });
         continue;
       }
+
+      const enginePath =
+        result.value &&
+        typeof (result.value as { path?: string }).path === "string"
+          ? (result.value as { path: string }).path
+          : resumePath;
 
       const summary = engineTorrentToSummary({
         torrentKey,
@@ -896,10 +901,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       summary.torrentKey = torrentKey;
       summary.name = s.name || summary.name;
       summary.infoHash = s.infoHash || summary.infoHash;
-      summary.magnetURI = s.magnetURI || (id.startsWith("magnet:") ? id : undefined);
+      summary.magnetURI =
+        s.magnetURI || (id.startsWith("magnet:") ? id : undefined);
       summary.torrentId = id;
-      summary.downloadPath = path;
-      summary.status = s.status === "seeding" ? "seeding" : "queued";
+      summary.downloadPath = enginePath;
+      // Engine will report real progress after verifying existing files
+      summary.status = "queued";
       get().upsertTorrent(summary);
       restored += 1;
     }
@@ -956,6 +963,12 @@ export const useAppStore = create<AppState>((set, get) => ({
             ? item.magnetURI
             : typeof item.magnetUri === "string"
               ? item.magnetUri
+              : null;
+        const diskPath =
+          typeof item.path === "string"
+            ? item.path
+            : typeof item.downloadPath === "string"
+              ? item.downloadPath
               : null;
 
         // Coerce key — JSON/serde may deliver number or numeric string
@@ -1038,7 +1051,8 @@ export const useAppStore = create<AppState>((set, get) => ({
           magnetURI:
             magnetURI || (idx >= 0 ? next[idx].magnetURI : undefined),
           torrentId: idx >= 0 ? next[idx].torrentId : undefined,
-          downloadPath: idx >= 0 ? next[idx].downloadPath : undefined,
+          downloadPath:
+            diskPath || (idx >= 0 ? next[idx].downloadPath : undefined),
           posterUrl: idx >= 0 ? next[idx].posterUrl : undefined,
           mock: false,
         };
@@ -1048,11 +1062,12 @@ export const useAppStore = create<AppState>((set, get) => ({
           shouldPersist = true;
         } else {
           const prev = next[idx];
-          // Identity fields changing → need to rewrite disk state
+          // Identity / path fields changing → rewrite disk state for resume
           if (
             (infoHash && prev.infoHash !== infoHash) ||
             (magnetURI && prev.magnetURI !== magnetURI) ||
-            (incomingName && prev.name !== incomingName)
+            (incomingName && prev.name !== incomingName) ||
+            (diskPath && prev.downloadPath !== diskPath)
           ) {
             shouldPersist = true;
           }
@@ -1063,7 +1078,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             gradient: prev.gradient ?? summary.gradient,
             magnetURI: summary.magnetURI || prev.magnetURI,
             torrentId: prev.torrentId || summary.torrentId,
-            downloadPath: prev.downloadPath || summary.downloadPath,
+            downloadPath: diskPath || prev.downloadPath || summary.downloadPath,
             posterUrl: prev.posterUrl || summary.posterUrl,
           };
         }

@@ -24,7 +24,8 @@ export interface AppPrefs {
 }
 
 export const DEFAULT_PREFS: AppPrefs = {
-  downloadPath: "~/Downloads/WebTorrent",
+  // Engine expands ~ ; keep tilde form portable across machines
+  downloadPath: "~/Downloads",
   openExternalPlayer: false,
   externalPlayerPath: "",
   startup: false,
