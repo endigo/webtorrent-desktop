@@ -247,11 +247,28 @@ body {
   text-shadow: rgba(0, 0, 0, 0.5) 0 0 4px;
 }
 
-.torrent .metadata .meta-line span:not(:last-child)::after {
-  content: " • ";
+.torrent .metadata .meta-line {
+  display: flex;
+  align-items: center; /* vertically center status, bar, speeds */
+  flex-wrap: nowrap;
+  min-height: 18px;
+  line-height: 1.2;
+  font-size: 14px;
+}
+
+.torrent .metadata .meta-line > span {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.torrent .metadata .meta-line > span:not(:last-child)::after {
+  content: "•";
   opacity: 0.7;
-  padding-left: 4px;
-  padding-right: 4px;
+  margin-left: 8px;
+  margin-right: 8px;
+  /* Keep the separator centered with the text line */
+  line-height: 1;
 }
 
 .torrent:hover .metadata {
@@ -341,9 +358,10 @@ body {
   height: 4px;
   background: rgba(0, 0, 0, 0.35);
   border-radius: 2px;
-  margin-right: 8px;
-  vertical-align: middle;
   overflow: hidden;
+  flex-shrink: 0;
+  /* Center the thin bar within the flex line-height of surrounding text */
+  align-self: center;
 }
 
 .progress-bar > i {
