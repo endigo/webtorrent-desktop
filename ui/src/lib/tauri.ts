@@ -325,10 +325,12 @@ export async function prefsMerge(
 export async function torrentAdd(
   args: TorrentAddArgs,
 ): Promise<InvokeResult<EngineTorrent | null>> {
-  // Rust engine.rs: torrent_add(torrent_key, torrent_id, path?, selections?)
+  // Tauri IPC renames Rust snake_case params to camelCase for invoke().
+  // Rust: torrent_add(torrent_key, torrent_id, path?, selections?)
+  // JS must pass: torrentKey, torrentId, path, selections
   return tryInvokeAliases<EngineTorrent | null>(["torrent_add"], {
-    torrent_key: args.torrentKey ?? Date.now(),
-    torrent_id: args.id,
+    torrentKey: args.torrentKey ?? Date.now(),
+    torrentId: args.id,
     path: args.path ?? null,
     selections: args.selections ?? null,
   });
@@ -339,17 +341,17 @@ export async function torrentRemove(
   _deleteData = false,
   torrentKey?: number,
 ): Promise<InvokeResult<boolean | null>> {
-  // Rust: torrent_remove(info_hash?, torrent_key?)
+  // Rust: torrent_remove(info_hash?, torrent_key?) → JS: infoHash, torrentKey
   return tryInvokeAliases<boolean | null>(["torrent_remove"], {
-    info_hash: infoHash,
-    torrent_key: torrentKey ?? null,
+    infoHash: infoHash,
+    torrentKey: torrentKey ?? null,
   });
 }
 
 export async function torrentCreate(
   args: TorrentCreateArgs,
 ): Promise<InvokeResult<EngineTorrent | { path?: string } | null>> {
-  // Rust: torrent_create(torrent_key, files, options?)
+  // Rust: torrent_create(torrent_key, files, options?) → JS: torrentKey, files, options
   const options: Record<string, unknown> = {
     name: args.name,
   };
@@ -360,7 +362,7 @@ export async function torrentCreate(
     options.announce = args.trackers;
   }
   return tryInvokeAliases(["torrent_create"], {
-    torrent_key: args.torrentKey ?? Date.now(),
+    torrentKey: args.torrentKey ?? Date.now(),
     files: args.paths,
     options,
   });
@@ -371,8 +373,8 @@ export async function torrentSelectFiles(
 ): Promise<InvokeResult<null>> {
   // Rust: torrent_select_files(info_hash?, torrent_key?, selections)
   return tryInvokeAliases(["torrent_select_files"], {
-    info_hash: args.infoHash ?? null,
-    torrent_key: args.torrentKey ?? null,
+    infoHash: args.infoHash ?? null,
+    torrentKey: args.torrentKey ?? null,
     selections: args.selections ?? [],
   });
 }
@@ -413,10 +415,10 @@ export async function streamStart(
   infoHash: string,
   torrentKey?: number,
 ): Promise<InvokeResult<StreamStartResult | string | null>> {
-  // Rust: stream_start(info_hash?, torrent_key?) → { localURL, networkURL, port, … }
+  // Rust: stream_start(info_hash?, torrent_key?) → JS: infoHash, torrentKey
   return tryInvokeAliases(["stream_start"], {
-    info_hash: infoHash,
-    torrent_key: torrentKey ?? null,
+    infoHash: infoHash,
+    torrentKey: torrentKey ?? null,
   });
 }
 
