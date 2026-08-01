@@ -1,8 +1,9 @@
 import { create } from "zustand";
-import type { AppView, TorrentSummary } from "../types/torrent";
+import type { AppView, SavedTorrent, TorrentSummary } from "../types/torrent";
 import {
   coerceStatus,
   statusFromProgress,
+  toSavedTorrent,
 } from "../types/torrent";
 import { DEFAULT_PREFS, mergePrefs, type AppPrefs } from "../types/prefs";
 import {
@@ -20,6 +21,12 @@ import {
   type EngineTorrent,
   type OpenResult,
 } from "../lib/tauri";
+
+/** Debounce timer for writing torrent list to disk */
+let persistTimer: ReturnType<typeof setTimeout> | null = null;
+const PERSIST_MS = 750;
+/** Avoid re-entry while restoring saved torrents on boot */
+let isRestoring = false;
 
 const MOCK_TORRENTS: TorrentSummary[] = [
   {
@@ -261,6 +268,21 @@ interface AppState {
     match: { infoHash?: string; torrentKey?: number },
     posterUrl: string,
   ) => void;
+  /** Write current torrent list to config.json (debounced). */
+  schedulePersistTorrents: () => void;
+  /** Flush torrent list to disk immediately. */
+  persistTorrentsNow: () => Promise<void>;
+  /** Re-add torrents from the last session after the engine is up. */
+  restoreSavedTorrents: () => Promise<void>;
+}
+
+function schedulePersistFromState(get: () => AppState) {
+  if (isRestoring) return;
+  if (persistTimer) clearTimeout(persistTimer);
+  persistTimer = setTimeout(() => {
+    persistTimer = null;
+    void get().persistTorrentsNow();
+  }, PERSIST_MS);
 }
 
 function formatOpenResult(label: string, result: OpenResult): string {
@@ -415,13 +437,14 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     const torrentKey = nextTorrentKey++;
     const downloadPath = get().prefs.downloadPath;
+    const resolvedPath =
+      downloadPath && !downloadPath.startsWith("~/")
+        ? downloadPath
+        : undefined;
     const result = await torrentAdd({
       id,
       torrentKey,
-      path:
-        downloadPath && !downloadPath.startsWith("~/")
-          ? downloadPath
-          : undefined,
+      path: resolvedPath,
     });
     if (result.ok) {
       // Engine add returns only { torrentKey, torrentId } — not full metadata.
@@ -441,12 +464,16 @@ export const useAppStore = create<AppState>((set, get) => ({
       });
       summary.torrentKey = torrentKey;
       summary.status = "queued";
+      summary.torrentId = id;
+      summary.magnetURI = id.startsWith("magnet:") ? id : undefined;
+      summary.downloadPath = resolvedPath;
       get().upsertTorrent(summary);
       set({
         magnetInput: "",
         statusMessage: `Added “${summary.name}”`,
         usingMockTorrents: false,
       });
+      get().schedulePersistTorrents();
       return;
     }
 
@@ -564,13 +591,20 @@ export const useAppStore = create<AppState>((set, get) => ({
           ? `Removed torrent ${infoHash.slice(0, 8)}…`
           : `Remove failed: ${result.message}`,
     }));
+    get().schedulePersistTorrents();
   },
 
   loadPrefs: async () => {
     const result = await prefsGet();
     if (result.ok) {
+      const merged = mergePrefs(DEFAULT_PREFS, result.value);
+      // Keep savedTorrents array from disk if present
+      const raw = result.value as AppPrefs & { savedTorrents?: SavedTorrent[] };
+      if (Array.isArray(raw.savedTorrents)) {
+        merged.savedTorrents = raw.savedTorrents;
+      }
       set({
-        prefs: mergePrefs(DEFAULT_PREFS, result.value),
+        prefs: merged,
         prefsLoaded: true,
       });
       return;
@@ -635,6 +669,8 @@ export const useAppStore = create<AppState>((set, get) => ({
             ? "Engine connected"
             : state.statusMessage,
       }));
+      // Resume last session once engine is up
+      void get().restoreSavedTorrents();
       return true;
     }
     return false;
@@ -741,9 +777,13 @@ export const useAppStore = create<AppState>((set, get) => ({
         gradient: prev.gradient ?? summary.gradient,
         // Never clobber an existing poster with empty
         posterUrl: summary.posterUrl || prev.posterUrl,
+        magnetURI: summary.magnetURI || prev.magnetURI,
+        torrentId: summary.torrentId || prev.torrentId,
+        downloadPath: summary.downloadPath || prev.downloadPath,
       };
       return { torrents: next };
     });
+    get().schedulePersistTorrents();
   },
 
   setTorrentPoster: (match, posterUrl) => {
@@ -765,6 +805,114 @@ export const useAppStore = create<AppState>((set, get) => ({
       next[idx] = { ...next[idx], posterUrl };
       return { torrents: next };
     });
+    // Posters are session-only (data URLs can be huge); list structure still persists
+  },
+
+  schedulePersistTorrents: () => {
+    schedulePersistFromState(get);
+  },
+
+  persistTorrentsNow: async () => {
+    if (isRestoring) return;
+    const saved = get()
+      .torrents.map(toSavedTorrent)
+      .filter((t): t is SavedTorrent => t != null);
+    // Keep prefs in sync document
+    set((state) => ({
+      prefs: { ...state.prefs, savedTorrents: saved },
+    }));
+    const result = await prefsMerge({ savedTorrents: saved });
+    if (!result.ok && result.reason === "error") {
+      console.warn("persist torrents failed", result.message);
+    }
+  },
+
+  restoreSavedTorrents: async () => {
+    if (isRestoring) return;
+    // Ensure prefs (incl. savedTorrents) are loaded
+    if (!get().prefsLoaded) {
+      await get().loadPrefs();
+    }
+    const saved = get().prefs.savedTorrents ?? [];
+    if (saved.length === 0) return;
+
+    // Skip if we already have real torrents matching saved hashes
+    const existing = new Set(
+      get()
+        .torrents.filter((t) => !t.mock)
+        .map((t) => t.infoHash),
+    );
+    const toRestore = saved.filter(
+      (s) => s.infoHash && !existing.has(s.infoHash),
+    );
+    if (toRestore.length === 0) return;
+
+    isRestoring = true;
+    set({
+      usingMockTorrents: false,
+      torrents: get().torrents.filter((t) => !t.mock),
+      statusMessage: `Restoring ${toRestore.length} torrent(s)…`,
+    });
+
+    const downloadDefault = get().prefs.downloadPath;
+    let restored = 0;
+    for (const s of toRestore) {
+      const id = (s.magnetURI || s.torrentId || "").trim();
+      if (!id) continue;
+      const torrentKey = nextTorrentKey++;
+      const path =
+        s.downloadPath && !s.downloadPath.startsWith("~/")
+          ? s.downloadPath
+          : downloadDefault && !downloadDefault.startsWith("~/")
+            ? downloadDefault
+            : undefined;
+
+      const result = await torrentAdd({ id, torrentKey, path });
+      if (!result.ok) {
+        console.warn("restore failed", s.name, result.message);
+        // Still show a row so the user sees it (can re-add manually)
+        get().upsertTorrent({
+          torrentKey,
+          infoHash: s.infoHash,
+          name: s.name,
+          status: "error",
+          progress: null,
+          magnetURI: s.magnetURI,
+          torrentId: id,
+          downloadPath: path,
+          errorMessage: result.message,
+          gradient: gradientForHash(s.infoHash),
+          mock: false,
+        });
+        continue;
+      }
+
+      const summary = engineTorrentToSummary({
+        torrentKey,
+        torrentId: id,
+        infoHash: s.infoHash,
+        name: s.name,
+      });
+      summary.torrentKey = torrentKey;
+      summary.name = s.name || summary.name;
+      summary.infoHash = s.infoHash || summary.infoHash;
+      summary.magnetURI = s.magnetURI || (id.startsWith("magnet:") ? id : undefined);
+      summary.torrentId = id;
+      summary.downloadPath = path;
+      summary.status = s.status === "seeding" ? "seeding" : "queued";
+      get().upsertTorrent(summary);
+      restored += 1;
+    }
+
+    isRestoring = false;
+    set({
+      statusMessage:
+        restored > 0
+          ? `Restored ${restored} torrent(s) from last session`
+          : get().statusMessage,
+    });
+    // Re-save in case some failed / keys reassigned
+    void get().persistTorrentsNow();
   },
 
   applyProgressEvent: (payload) => {
@@ -784,6 +932,8 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     if (items.length === 0) return;
 
+    let shouldPersist = false;
+
     set((state) => {
       let next = state.torrents.slice();
       let changed = false;
@@ -801,6 +951,12 @@ export const useAppStore = create<AppState>((set, get) => ({
               : null;
         const infoHash =
           infoHashRaw && infoHashRaw !== "undefined" ? infoHashRaw : null;
+        const magnetURI =
+          typeof item.magnetURI === "string"
+            ? item.magnetURI
+            : typeof item.magnetUri === "string"
+              ? item.magnetUri
+              : null;
 
         // Coerce key — JSON/serde may deliver number or numeric string
         const rawKey = item.torrentKey ?? item.torrent_key;
@@ -879,17 +1035,36 @@ export const useAppStore = create<AppState>((set, get) => ({
           gradient: gradientForHash(
             infoHash ?? (idx >= 0 ? next[idx].infoHash : name),
           ),
+          magnetURI:
+            magnetURI || (idx >= 0 ? next[idx].magnetURI : undefined),
+          torrentId: idx >= 0 ? next[idx].torrentId : undefined,
+          downloadPath: idx >= 0 ? next[idx].downloadPath : undefined,
+          posterUrl: idx >= 0 ? next[idx].posterUrl : undefined,
           mock: false,
         };
 
         if (idx === -1) {
           next.push(summary);
+          shouldPersist = true;
         } else {
+          const prev = next[idx];
+          // Identity fields changing → need to rewrite disk state
+          if (
+            (infoHash && prev.infoHash !== infoHash) ||
+            (magnetURI && prev.magnetURI !== magnetURI) ||
+            (incomingName && prev.name !== incomingName)
+          ) {
+            shouldPersist = true;
+          }
           next[idx] = {
-            ...next[idx],
+            ...prev,
             ...summary,
-            torrentKey: next[idx].torrentKey,
-            gradient: next[idx].gradient ?? summary.gradient,
+            torrentKey: prev.torrentKey,
+            gradient: prev.gradient ?? summary.gradient,
+            magnetURI: summary.magnetURI || prev.magnetURI,
+            torrentId: prev.torrentId || summary.torrentId,
+            downloadPath: prev.downloadPath || summary.downloadPath,
+            posterUrl: prev.posterUrl || summary.posterUrl,
           };
         }
         changed = true;
@@ -898,6 +1073,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (!changed) return state;
       return { torrents: next, usingMockTorrents: false };
     });
+
+    if (shouldPersist) {
+      get().schedulePersistTorrents();
+    }
   },
 }));
 

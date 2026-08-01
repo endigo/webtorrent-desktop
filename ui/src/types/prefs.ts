@@ -3,6 +3,8 @@
  * Rust prefs module stores arbitrary JSON; this is the UI contract.
  */
 
+import type { SavedTorrent } from "./torrent";
+
 export interface AppPrefs {
   downloadPath: string;
   openExternalPlayer: boolean;
@@ -14,6 +16,11 @@ export interface AppPrefs {
   torrentsFolderPath: string;
   isFileHandler: boolean;
   sortByName: boolean;
+  /**
+   * Torrents to resume on next launch (written next to prefs in config.json).
+   * Not edited by the Preferences page — managed by the torrent store.
+   */
+  savedTorrents?: SavedTorrent[];
 }
 
 export const DEFAULT_PREFS: AppPrefs = {
@@ -27,6 +34,7 @@ export const DEFAULT_PREFS: AppPrefs = {
   torrentsFolderPath: "",
   isFileHandler: false,
   sortByName: false,
+  savedTorrents: [],
 };
 
 export function mergePrefs(

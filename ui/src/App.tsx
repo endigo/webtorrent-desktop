@@ -143,6 +143,7 @@ function useShellBridge() {
           applyProgressEvent({
             torrentKey: payload.torrentKey,
             infoHash: payload.infoHash,
+            magnetURI: payload.magnetURI,
             name:
               typeof payload.magnetURI === "string"
                 ? undefined
@@ -150,7 +151,7 @@ function useShellBridge() {
           });
         }),
         onTorrentMetadata((payload) => {
-          // Engine: { torrentKey, info: { name, infoHash, ... } }
+          // Engine: { torrentKey, info: { name, infoHash, magnetURI, ... } }
           const info =
             payload.info && typeof payload.info === "object"
               ? (payload.info as Record<string, unknown>)
@@ -158,6 +159,7 @@ function useShellBridge() {
           applyProgressEvent({
             ...info,
             torrentKey: payload.torrentKey ?? info.torrentKey,
+            magnetURI: info.magnetURI ?? payload.magnetURI,
             // Keep progress fields if this event has none
             ready: false,
           });
@@ -177,6 +179,7 @@ function useShellBridge() {
           applyProgressEvent({
             ...info,
             torrentKey: payload.torrentKey ?? info.torrentKey,
+            magnetURI: info.magnetURI ?? payload.magnetURI,
             ready: true,
           });
         }),

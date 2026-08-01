@@ -27,10 +27,41 @@ export interface TorrentSummary {
   gradient?: string;
   /** data: URL or http URL for poster / cover / captured frame */
   posterUrl?: string;
+  /** Magnet URI once known — used to resume after restart */
+  magnetURI?: string;
+  /** Original add id (magnet, info-hash, or .torrent path) */
+  torrentId?: string;
+  /** Download directory used for this torrent */
+  downloadPath?: string;
   testID?: string;
   /** True when this row came from mock seed data, not the engine */
   mock?: boolean;
   errorMessage?: string;
+}
+
+/** Compact record written to config.json for session restore. */
+export interface SavedTorrent {
+  infoHash: string;
+  name: string;
+  magnetURI?: string;
+  torrentId?: string;
+  downloadPath?: string;
+  status?: TorrentStatus;
+}
+
+export function toSavedTorrent(t: TorrentSummary): SavedTorrent | null {
+  if (t.mock) return null;
+  if (!t.infoHash || t.infoHash.startsWith("pending-")) return null;
+  const resumeId = t.magnetURI || t.torrentId;
+  if (!resumeId) return null;
+  return {
+    infoHash: t.infoHash,
+    name: t.name,
+    magnetURI: t.magnetURI,
+    torrentId: t.torrentId || t.magnetURI,
+    downloadPath: t.downloadPath,
+    status: t.status === "error" ? "queued" : t.status,
+  };
 }
 
 export type AppView =
