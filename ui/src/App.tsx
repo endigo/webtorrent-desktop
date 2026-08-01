@@ -1,4 +1,6 @@
 import { useEffect } from "react";
+import { Box } from "@mantine/core";
+import { notifications } from "@mantine/notifications";
 import { Header } from "./components/Header";
 import { CreateTorrentPage } from "./pages/CreateTorrentPage";
 import { PlayerPage } from "./pages/PlayerPage";
@@ -19,7 +21,6 @@ import {
   setWindowTitle,
 } from "./lib/tauri";
 import { useAppStore } from "./store/useAppStore";
-import "./styles/global.css";
 
 function ViewRouter() {
   const view = useAppStore((s) => s.view);
@@ -36,22 +37,19 @@ function ViewRouter() {
   }
 }
 
-function StatusBar() {
+function useStatusNotifications() {
   const statusMessage = useAppStore((s) => s.statusMessage);
   const setStatusMessage = useAppStore((s) => s.setStatusMessage);
 
   useEffect(() => {
     if (!statusMessage) return;
-    const id = window.setTimeout(() => setStatusMessage(null), 4000);
-    return () => window.clearTimeout(id);
+    notifications.show({
+      message: statusMessage,
+      color: "dark",
+      autoClose: 3500,
+    });
+    setStatusMessage(null);
   }, [statusMessage, setStatusMessage]);
-
-  if (!statusMessage) return null;
-  return (
-    <div className="status-bar" role="status">
-      {statusMessage}
-    </div>
-  );
 }
 
 function classifyDroppedPaths(paths: string[]): {
@@ -139,7 +137,6 @@ function useShellBridge() {
           );
         }),
         onTorrentParsed((payload) => {
-          // Early: { torrentKey, infoHash, magnetURI }
           applyProgressEvent({
             torrentKey: payload.torrentKey,
             infoHash: payload.infoHash,
@@ -151,7 +148,6 @@ function useShellBridge() {
           });
         }),
         onTorrentMetadata((payload) => {
-          // Engine: { torrentKey, info: { name, infoHash, magnetURI, ... } }
           const info =
             payload.info && typeof payload.info === "object"
               ? (payload.info as Record<string, unknown>)
@@ -160,7 +156,6 @@ function useShellBridge() {
             ...info,
             torrentKey: payload.torrentKey ?? info.torrentKey,
             magnetURI: info.magnetURI ?? payload.magnetURI,
-            // Keep progress fields if this event has none
             ready: false,
           });
           const name =
@@ -221,17 +216,14 @@ function useShellBridge() {
       cancelled = true;
       unsubs.forEach((off) => off());
     };
-    // Store actions are stable zustand refs; mount-once is intentional.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Keep native window title in sync with chrome title.
   useEffect(() => {
     void setWindowTitle(windowTitle);
   }, [windowTitle]);
 }
 
-/** Global keyboard shortcuts (Electron chrome parity lite). */
 function useKeyboardShortcuts() {
   const back = useAppStore((s) => s.back);
   const navigate = useAppStore((s) => s.navigate);
@@ -277,14 +269,22 @@ export default function App() {
   const view = useAppStore((s) => s.view);
   useShellBridge();
   useKeyboardShortcuts();
+  useStatusNotifications();
 
   return (
-    <div className={`app is-focused view-${view}`}>
+    <Box className={`app-shell view-${view}`}>
       <Header />
-      <main className="content">
+      <Box
+        className="app-content"
+        component="main"
+        pt={view === "player" ? 0 : 0}
+        style={{
+          // Header is in-flow except player overlay
+          marginTop: view === "player" ? 0 : 0,
+        }}
+      >
         <ViewRouter />
-      </main>
-      <StatusBar />
-    </div>
+      </Box>
+    </Box>
   );
 }

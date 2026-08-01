@@ -1,4 +1,16 @@
 import { useCallback, useState, type CSSProperties } from "react";
+import {
+  ActionIcon,
+  Box,
+  Button,
+  Group,
+  Progress,
+  Stack,
+  Text,
+  TextInput,
+  Tooltip,
+} from "@mantine/core";
+import { IconPlayerPlay, IconTrash } from "@tabler/icons-react";
 import { useAppStore } from "../store/useAppStore";
 import type { TorrentSummary } from "../types/torrent";
 
@@ -31,20 +43,30 @@ function statusLabel(t: TorrentSummary): string {
   }
 }
 
-function PlayIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M8 5v14l11-7z" />
-    </svg>
-  );
-}
+function metaParts(torrent: TorrentSummary): string[] {
+  const prog = torrent.progress;
+  const pct = prog ? Math.floor(prog.progress * 100) : 0;
+  const parts = [statusLabel(torrent)];
+  if (!prog) return parts;
 
-function DeleteIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z" />
-    </svg>
-  );
+  if (torrent.status === "downloading") {
+    parts.push(`${pct}%`);
+    parts.push(`${formatBytes(prog.downloaded)} / ${formatBytes(prog.length)}`);
+    parts.push(`${prog.numPeers} peers`);
+    parts.push(`↓ ${formatSpeed(prog.downloadSpeed)}`);
+    parts.push(`↑ ${formatSpeed(prog.uploadSpeed)}`);
+  } else if (torrent.status === "seeding") {
+    parts.push(formatBytes(prog.length));
+    parts.push(`${prog.numPeers} peers`);
+    parts.push(`↑ ${formatSpeed(prog.uploadSpeed)}`);
+  } else if (
+    torrent.status === "paused" ||
+    torrent.status === "done" ||
+    torrent.status === "queued"
+  ) {
+    parts.push(`${pct}% · ${formatBytes(prog.length)}`);
+  }
+  return parts;
 }
 
 function TorrentRow({ torrent }: { torrent: TorrentSummary }) {
@@ -57,25 +79,31 @@ function TorrentRow({ torrent }: { torrent: TorrentSummary }) {
   const prog = torrent.progress;
   const pct = prog ? Math.floor(prog.progress * 100) : 0;
 
-  // Poster (when available) + dark gradient overlay for readable text, else solid gradient
-  const rowStyle: CSSProperties | undefined = torrent.posterUrl
+  const rowStyle: CSSProperties = torrent.posterUrl
     ? {
         backgroundImage: [
-          "linear-gradient(to bottom, rgba(0,0,0,0.45) 0%, rgba(0,0,0,0.55) 100%)",
+          "linear-gradient(to bottom, rgba(0,0,0,0.5) 0%, rgba(0,0,0,0.6) 100%)",
           `url(${JSON.stringify(torrent.posterUrl)})`,
         ].join(", "),
-        backgroundSize: "cover",
-        backgroundPosition: "center",
       }
-    : torrent.gradient
-      ? { background: torrent.gradient }
-      : undefined;
+    : {
+        background:
+          torrent.gradient ||
+          "linear-gradient(to bottom right, #4b79a1, #283e51)",
+      };
 
   return (
-    <div
+    <Box
       id={torrent.testID ? `torrent-${torrent.testID}` : undefined}
-      className={`torrent${selected ? " selected" : ""}${torrent.posterUrl ? " has-poster" : ""}`}
-      style={rowStyle}
+      className={`torrent-row-poster${selected ? " selected" : ""}`}
+      style={{
+        ...rowStyle,
+        height: 100,
+        position: "relative",
+        borderBottom: "1px solid var(--mantine-color-dark-7)",
+        outline: selected ? "1px solid rgba(255,255,255,0.15)" : undefined,
+        cursor: "default",
+      }}
       onClick={() => selectTorrent(torrent.infoHash)}
       role="button"
       tabIndex={0}
@@ -86,70 +114,81 @@ function TorrentRow({ torrent }: { torrent: TorrentSummary }) {
         }
       }}
     >
-      <div className="metadata">
-        <div className="name ellipsis">{torrent.name}</div>
-        <div className="meta-line ellipsis">
-          <span>{statusLabel(torrent)}</span>
+      <Stack
+        gap={6}
+        justify="center"
+        style={{
+          position: "absolute",
+          inset: "16px 100px 16px 16px",
+          textShadow: "0 0 4px rgba(0,0,0,0.6)",
+        }}
+      >
+        <Text fw={700} size="lg" c="white" lineClamp={1}>
+          {torrent.name}
+        </Text>
+        <Group gap="xs" wrap="nowrap" align="center">
           {prog && torrent.status === "downloading" && (
-            <>
-              <span className="progress-bar" aria-hidden="true">
-                <i style={{ width: `${pct}%` }} />
-              </span>
-              <span>{pct}%</span>
-              <span>
-                {formatBytes(prog.downloaded)} / {formatBytes(prog.length)}
-              </span>
-              <span>{prog.numPeers} peers</span>
-              <span>↓ {formatSpeed(prog.downloadSpeed)}</span>
-              <span>↑ {formatSpeed(prog.uploadSpeed)}</span>
-            </>
+            <Progress
+              value={pct}
+              size={6}
+              w={80}
+              color="gray.0"
+              bg="rgba(0,0,0,0.35)"
+              style={{ flexShrink: 0 }}
+            />
           )}
-          {prog && torrent.status === "seeding" && (
-            <>
-              <span>{formatBytes(prog.length)}</span>
-              <span>{prog.numPeers} peers</span>
-              <span>↑ {formatSpeed(prog.uploadSpeed)}</span>
-            </>
-          )}
-          {prog &&
-            (torrent.status === "paused" ||
-              torrent.status === "done" ||
-              torrent.status === "queued") && (
-              <>
-                <span>
-                  {pct}% · {formatBytes(prog.length)}
-                </span>
-              </>
-            )}
-        </div>
-      </div>
-      <div className="torrent-controls">
-        <button
-          type="button"
-          className="control-btn play"
-          title="Play"
-          aria-label={`Play ${torrent.name}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            playTorrent(torrent.infoHash);
-          }}
-        >
-          <PlayIcon />
-        </button>
-        <button
-          type="button"
-          className="control-btn"
-          title="Remove"
-          aria-label={`Remove ${torrent.name}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            void removeTorrent(torrent.infoHash);
-          }}
-        >
-          <DeleteIcon />
-        </button>
-      </div>
-    </div>
+          <Text size="sm" c="gray.2" lineClamp={1} style={{ flex: 1 }}>
+            {metaParts(torrent).join(" · ")}
+          </Text>
+        </Group>
+      </Stack>
+
+      <Group
+        gap={4}
+        style={{
+          position: "absolute",
+          top: "50%",
+          right: 12,
+          transform: "translateY(-50%)",
+          opacity: 0,
+          transition: "opacity 0.12s ease",
+        }}
+        className="torrent-actions"
+      >
+        <Tooltip label="Play">
+          <ActionIcon
+            variant="transparent"
+            color="gray.0"
+            size="lg"
+            aria-label={`Play ${torrent.name}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              playTorrent(torrent.infoHash);
+            }}
+          >
+            <IconPlayerPlay size={28} />
+          </ActionIcon>
+        </Tooltip>
+        <Tooltip label="Remove">
+          <ActionIcon
+            variant="transparent"
+            color="gray.0"
+            size="lg"
+            aria-label={`Remove ${torrent.name}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              void removeTorrent(torrent.infoHash);
+            }}
+          >
+            <IconTrash size={22} />
+          </ActionIcon>
+        </Tooltip>
+      </Group>
+
+      <style>{`
+        .torrent-row-poster:hover .torrent-actions { opacity: 1 !important; }
+      `}</style>
+    </Box>
   );
 }
 
@@ -178,8 +217,6 @@ export function TorrentListPage() {
     e.preventDefault();
     e.stopPropagation();
     setDragOver(false);
-    // Tauri onDragDropEvent handles real paths; HTML5 drop is a visual affordance
-    // and may only yield file names in the webview. Prefer magnet text drops.
     const text = e.dataTransfer.getData("text/plain")?.trim();
     if (text?.startsWith("magnet:")) {
       void useAppStore.getState().handleAddMagnet(text);
@@ -187,92 +224,86 @@ export function TorrentListPage() {
   }, []);
 
   return (
-    <div
-      className={`torrent-list${dragOver ? " is-dragover" : ""}`}
+    <Box
       onContextMenu={(e) => e.preventDefault()}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
+      style={{ minHeight: "100%" }}
     >
       {torrents.map((t) => (
         <TorrentRow key={t.torrentKey} torrent={t} />
       ))}
 
-      <div className={`torrent-placeholder${dragOver ? " active" : ""}`}>
-        <span className="ellipsis">
-          {dragOver
-            ? "Drop to add torrent or create from files"
-            : "Drop a torrent file here or paste a magnet link"}
-        </span>
-      </div>
+      <Box p={10} h={100}>
+        <Box
+          h="100%"
+          style={{
+            border: `5px dashed ${dragOver ? "var(--mantine-color-wtBlue-5)" : "#444"}`,
+            borderRadius: 5,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: dragOver ? "var(--mantine-color-wtBlue-2)" : "#666",
+            background: dragOver
+              ? "rgba(75, 121, 161, 0.12)"
+              : "transparent",
+            transition: "border-color 0.15s, color 0.15s, background 0.15s",
+          }}
+        >
+          <Text size="md" c="inherit">
+            {dragOver
+              ? "Drop to add torrent or create from files"
+              : "Drop a torrent file here or paste a magnet link"}
+          </Text>
+        </Box>
+      </Box>
 
-      <div className="page-shell list-actions">
-        <div className="field magnet-field">
-          <label htmlFor="magnet-input">Magnet link or torrent path</label>
-          <div className="magnet-row">
-            <input
-              id="magnet-input"
-              type="text"
-              value={magnetInput}
-              placeholder="magnet:?xt=urn:btih:…"
-              onChange={(e) => setMagnetInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  void handleAddMagnet();
-                }
-              }}
-              onPaste={(e) => {
-                const text = e.clipboardData.getData("text");
-                if (text.trim().startsWith("magnet:")) {
-                  // Allow paste then auto-add on next tick
-                  window.setTimeout(() => {
-                    void useAppStore.getState().handleAddMagnet(text.trim());
-                  }, 0);
-                }
-              }}
-            />
-            <button
-              type="button"
-              className="btn primary"
-              onClick={() => void handleAddMagnet()}
-            >
+      <Stack p="md" maw={720} gap="md">
+        <TextInput
+          label="Magnet link or torrent path"
+          placeholder="magnet:?xt=urn:btih:…"
+          value={magnetInput}
+          onChange={(e) => setMagnetInput(e.currentTarget.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              void handleAddMagnet();
+            }
+          }}
+          onPaste={(e) => {
+            const text = e.clipboardData.getData("text");
+            if (text.trim().startsWith("magnet:")) {
+              window.setTimeout(() => {
+                void useAppStore.getState().handleAddMagnet(text.trim());
+              }, 0);
+            }
+          }}
+          rightSectionWidth={72}
+          rightSection={
+            <Button size="compact-sm" onClick={() => void handleAddMagnet()}>
               Add
-            </button>
-          </div>
-        </div>
+            </Button>
+          }
+        />
 
-        <div className="actions">
-          <button
-            type="button"
-            className="btn primary"
-            onClick={() => void handleOpenTorrent()}
-          >
-            Open torrent
-          </button>
-          <button
-            type="button"
-            className="btn"
-            onClick={() => void handleOpenFiles()}
-          >
+        <Group gap="sm">
+          <Button onClick={() => void handleOpenTorrent()}>Open torrent</Button>
+          <Button variant="default" onClick={() => void handleOpenFiles()}>
             Create torrent…
-          </button>
-          <button
-            type="button"
-            className="btn ghost"
-            onClick={() => navigate("preferences")}
-          >
+          </Button>
+          <Button variant="subtle" onClick={() => navigate("preferences")}>
             Preferences
-          </button>
-        </div>
+          </Button>
+        </Group>
 
         {usingMockTorrents && (
-          <p className="hint-muted">
-            Showing sample torrents — engine commands will replace this list
-            when W2 is ready.
-          </p>
+          <Text size="sm" c="dimmed">
+            Showing sample torrents — engine will replace this list when
+            connected.
+          </Text>
         )}
-      </div>
-    </div>
+      </Stack>
+    </Box>
   );
 }

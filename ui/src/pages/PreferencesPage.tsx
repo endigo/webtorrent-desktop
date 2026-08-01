@@ -1,4 +1,13 @@
 import { useEffect, useState } from "react";
+import {
+  Button,
+  Checkbox,
+  Group,
+  Stack,
+  Text,
+  TextInput,
+  Title,
+} from "@mantine/core";
 import { autostartIsEnabled, openFolder } from "../lib/tauri";
 import { useAppStore } from "../store/useAppStore";
 import type { AppPrefs } from "../types/prefs";
@@ -16,9 +25,7 @@ export function PreferencesPage() {
   const [autostartHint, setAutostartHint] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!prefsLoaded) {
-      void loadPrefs();
-    }
+    if (!prefsLoaded) void loadPrefs();
   }, [prefsLoaded, loadPrefs]);
 
   useEffect(() => {
@@ -74,106 +81,72 @@ export function PreferencesPage() {
   };
 
   return (
-    <div className="page-shell">
-      <h1>Preferences</h1>
+    <Stack p="lg" maw={640} gap="xl">
+      <Title order={2}>Preferences</Title>
 
-      <section className="prefs-section">
-        <h2>Downloads</h2>
-        <div className="field">
-          <label htmlFor="pref-download">Download location</label>
-          <div className="path-row">
-            <input
-              id="pref-download"
-              type="text"
-              value={draft.downloadPath}
-              onChange={(e) => patch("downloadPath", e.target.value)}
-            />
-            <button
-              type="button"
-              className="btn"
-              onClick={() => void browseDownloadPath()}
-            >
-              Browse…
-            </button>
-          </div>
-          <p className="hint-muted" style={{ marginTop: 6 }}>
-            Uses <code>open_directory</code> / dialog plugin when available
-          </p>
-        </div>
-      </section>
+      <Stack gap="sm">
+        <Title order={4}>Downloads</Title>
+        <Group align="flex-end" wrap="nowrap">
+          <TextInput
+            style={{ flex: 1 }}
+            label="Download location"
+            value={draft.downloadPath}
+            onChange={(e) => patch("downloadPath", e.currentTarget.value)}
+          />
+          <Button variant="default" onClick={() => void browseDownloadPath()}>
+            Browse…
+          </Button>
+        </Group>
+      </Stack>
 
-      <section className="prefs-section">
-        <h2>Playback</h2>
-        <label className="checkbox-row">
-          <input
-            type="checkbox"
-            checked={!draft.openExternalPlayer}
-            onChange={(e) => patch("openExternalPlayer", !e.target.checked)}
-          />
-          Play torrent media files using WebTorrent
-        </label>
-        <label className="checkbox-row">
-          <input
-            type="checkbox"
-            checked={draft.highestPlaybackPriority}
-            onChange={(e) =>
-              patch("highestPlaybackPriority", e.target.checked)
-            }
-          />
-          Highest playback priority
-        </label>
-      </section>
+      <Stack gap="sm">
+        <Title order={4}>Playback</Title>
+        <Checkbox
+          label="Play torrent media files using WebTorrent"
+          checked={!draft.openExternalPlayer}
+          onChange={(e) => patch("openExternalPlayer", !e.currentTarget.checked)}
+        />
+        <Checkbox
+          label="Highest playback priority"
+          checked={draft.highestPlaybackPriority}
+          onChange={(e) =>
+            patch("highestPlaybackPriority", e.currentTarget.checked)
+          }
+        />
+      </Stack>
 
-      <section className="prefs-section">
-        <h2>System</h2>
-        <label className="checkbox-row">
-          <input
-            type="checkbox"
-            checked={draft.startup}
-            onChange={(e) => patch("startup", e.target.checked)}
-          />
-          Open WebTorrent on startup
-        </label>
+      <Stack gap="sm">
+        <Title order={4}>System</Title>
+        <Checkbox
+          label="Open WebTorrent on startup"
+          checked={draft.startup}
+          onChange={(e) => patch("startup", e.currentTarget.checked)}
+        />
         {autostartHint && (
-          <p className="hint-muted" style={{ marginTop: 4 }}>
+          <Text size="sm" c="dimmed">
             {autostartHint}
-          </p>
+          </Text>
         )}
-        <label className="checkbox-row">
-          <input
-            type="checkbox"
-            checked={draft.soundNotifications}
-            onChange={(e) => patch("soundNotifications", e.target.checked)}
-          />
-          Enable sounds
-        </label>
-        <label className="checkbox-row">
-          <input
-            type="checkbox"
-            checked={draft.isFileHandler}
-            onChange={(e) => patch("isFileHandler", e.target.checked)}
-          />
-          Handle <code>.torrent</code> files and magnet links
-        </label>
-      </section>
+        <Checkbox
+          label="Enable sounds"
+          checked={draft.soundNotifications}
+          onChange={(e) => patch("soundNotifications", e.currentTarget.checked)}
+        />
+        <Checkbox
+          label="Handle .torrent files and magnet links"
+          checked={draft.isFileHandler}
+          onChange={(e) => patch("isFileHandler", e.currentTarget.checked)}
+        />
+      </Stack>
 
-      <div className="actions">
-        <button
-          type="button"
-          className="btn primary"
-          disabled={saving}
-          onClick={() => void onDone()}
-        >
-          {saving ? "Saving…" : "Done"}
-        </button>
-        <button
-          type="button"
-          className="btn ghost"
-          onClick={() => navigate("torrent-list")}
-        >
+      <Group>
+        <Button loading={saving} onClick={() => void onDone()}>
+          Done
+        </Button>
+        <Button variant="subtle" onClick={() => navigate("torrent-list")}>
           Cancel
-        </button>
-      </div>
-    </div>
+        </Button>
+      </Group>
+    </Stack>
   );
 }

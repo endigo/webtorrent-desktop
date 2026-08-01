@@ -1,4 +1,16 @@
 import { useEffect, useState } from "react";
+import {
+  Button,
+  Checkbox,
+  Code,
+  Group,
+  List,
+  Stack,
+  Text,
+  Textarea,
+  TextInput,
+  Title,
+} from "@mantine/core";
 import { useAppStore } from "../store/useAppStore";
 
 const DEFAULT_TRACKERS = [
@@ -25,7 +37,6 @@ export function CreateTorrentPage() {
   const [trackers, setTrackers] = useState(DEFAULT_TRACKERS);
   const [submitting, setSubmitting] = useState(false);
 
-  // Keep name in sync when paths change (e.g. re-pick files)
   useEffect(() => {
     if (paths.length > 0) {
       const base = paths[0].split(/[/\\]/).filter(Boolean).pop();
@@ -34,89 +45,70 @@ export function CreateTorrentPage() {
   }, [paths]);
 
   return (
-    <div className="page-shell create-torrent">
-      <h1>Create Torrent</h1>
-      <p>
-        Choose files or a folder, then create a <code>.torrent</code> metadata
-        file. Wired to <code>torrent_create</code> when the engine is available.
-      </p>
+    <Stack p="lg" maw={640} gap="md">
+      <Title order={2}>Create Torrent</Title>
+      <Text size="sm" c="dimmed">
+        Choose files or a folder, then create a <Code>.torrent</Code> metadata
+        file.
+      </Text>
 
-      <div className="field torrent-attribute">
-        <label htmlFor="ct-files">Files / folder</label>
+      <Stack gap={6}>
+        <Text size="sm" fw={500}>
+          Files / folder
+        </Text>
         {paths.length === 0 ? (
-          <p className="path-value">No files selected</p>
+          <Text size="sm" c="dimmed">
+            No files selected
+          </Text>
         ) : (
-          <ul className="path-list">
+          <List size="sm" spacing={2}>
             {paths.map((p) => (
-              <li key={p} className="path-value">
-                {p}
-              </li>
+              <List.Item key={p}>
+                <Text size="sm" ff="monospace" lineClamp={1}>
+                  {p}
+                </Text>
+              </List.Item>
             ))}
-          </ul>
+          </List>
         )}
-        <div className="actions" style={{ marginTop: 8 }}>
-          <button
-            type="button"
-            className="btn"
-            onClick={() => void handleOpenFiles()}
-          >
+        <Group gap="sm">
+          <Button variant="default" onClick={() => void handleOpenFiles()}>
             Choose files…
-          </button>
-          <button
-            type="button"
-            className="btn"
-            onClick={() => void handleOpenFolder()}
-          >
+          </Button>
+          <Button variant="default" onClick={() => void handleOpenFolder()}>
             Choose folder…
-          </button>
-        </div>
-      </div>
+          </Button>
+        </Group>
+      </Stack>
 
-      <div className="field">
-        <label htmlFor="ct-name">Torrent name</label>
-        <input
-          id="ct-name"
-          type="text"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-        />
-      </div>
+      <TextInput
+        label="Torrent name"
+        value={name}
+        onChange={(e) => setName(e.currentTarget.value)}
+      />
+      <TextInput
+        label="Comment"
+        value={comment}
+        onChange={(e) => setComment(e.currentTarget.value)}
+        placeholder="Optional"
+      />
+      <Textarea
+        label="Trackers"
+        minRows={4}
+        value={trackers}
+        onChange={(e) => setTrackers(e.currentTarget.value)}
+        autosize
+      />
+      <Checkbox
+        label="Private torrent"
+        checked={isPrivate}
+        onChange={(e) => setIsPrivate(e.currentTarget.checked)}
+      />
 
-      <div className="field">
-        <label htmlFor="ct-comment">Comment</label>
-        <input
-          id="ct-comment"
-          type="text"
-          value={comment}
-          onChange={(e) => setComment(e.target.value)}
-          placeholder="Optional"
-        />
-      </div>
-
-      <div className="field">
-        <label htmlFor="ct-trackers">Trackers</label>
-        <textarea
-          id="ct-trackers"
-          rows={4}
-          value={trackers}
-          onChange={(e) => setTrackers(e.target.value)}
-        />
-      </div>
-
-      <label className="checkbox-row">
-        <input
-          type="checkbox"
-          checked={isPrivate}
-          onChange={(e) => setIsPrivate(e.target.checked)}
-        />
-        Private torrent
-      </label>
-
-      <div className="actions">
-        <button
-          type="button"
-          className="btn primary"
-          disabled={submitting || !name.trim()}
+      <Group>
+        <Button
+          loading={submitting}
+          disabled={!name.trim()}
           onClick={() => {
             setSubmitting(true);
             void handleCreateTorrent({
@@ -130,16 +122,12 @@ export function CreateTorrentPage() {
             }).finally(() => setSubmitting(false));
           }}
         >
-          {submitting ? "Creating…" : "Create torrent"}
-        </button>
-        <button
-          type="button"
-          className="btn ghost"
-          onClick={() => navigate("torrent-list")}
-        >
+          Create torrent
+        </Button>
+        <Button variant="subtle" onClick={() => navigate("torrent-list")}>
           Cancel
-        </button>
-      </div>
-    </div>
+        </Button>
+      </Group>
+    </Stack>
   );
 }

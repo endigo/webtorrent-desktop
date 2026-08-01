@@ -1,30 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  ActionIcon,
+  Box,
+  Button,
+  Group,
+  Slider,
+  Stack,
+  Text,
+  Tooltip,
+} from "@mantine/core";
+import {
+  IconPlayerPause,
+  IconPlayerPlay,
+  IconVolume,
+} from "@tabler/icons-react";
 import { streamStart, streamStop } from "../lib/tauri";
 import { useAppStore } from "../store/useAppStore";
-
-function PlayIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M8 5v14l11-7z" />
-    </svg>
-  );
-}
-
-function PauseIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
-    </svg>
-  );
-}
-
-function VolumeIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z" />
-    </svg>
-  );
-}
 
 function formatTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
@@ -36,7 +27,6 @@ function formatTime(seconds: number): string {
   return `${m}:${pad(s)}`;
 }
 
-/** Normalize stream_start payload into a playable base URL + file index. */
 function extractStream(
   value:
     | {
@@ -82,8 +72,6 @@ export function PlayerPage() {
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(1);
 
-  // Start HTTP stream when a real (non-mock) torrent is selected.
-  // Works while still downloading — WebTorrent serve range-requests.
   useEffect(() => {
     let cancelled = false;
 
@@ -98,7 +86,6 @@ export function PlayerPage() {
         return;
       }
 
-      // Prefer torrentKey; infoHash may still be pending-* before metadata
       const canResolve =
         torrent.torrentKey != null ||
         (torrent.infoHash && !torrent.infoHash.startsWith("pending-"));
@@ -141,12 +128,11 @@ export function PlayerPage() {
         return;
       }
 
-      // WebTorrent createServer serves file index N at /N — stream while downloading
       const url = `${extracted.base.replace(/\/$/, "")}/${extracted.fileIndex}`;
       setStreamUrl(url);
       setStatus(
         extracted.fileName
-          ? `Streaming ${extracted.fileName} (while downloading)`
+          ? `Streaming ${extracted.fileName}`
           : "Streaming while downloading",
       );
     }
@@ -159,32 +145,24 @@ export function PlayerPage() {
     };
   }, [torrent?.infoHash, torrent?.torrentKey, torrent?.mock]);
 
-  // Autoplay when the stream URL is ready (user already clicked Play on the list)
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !streamUrl) return;
     video.volume = volume;
-    const tryPlay = () => {
+    const id = window.setTimeout(() => {
       void video
         .play()
         .then(() => setPlaying(true))
-        .catch((err) => {
-          setPlaying(false);
-          // Autoplay blocked or media not ready yet — user can press play
-          console.warn("autoplay failed", err);
-        });
-    };
-    // Small delay so the element mounts with src
-    const id = window.setTimeout(tryPlay, 50);
+        .catch(() => setPlaying(false));
+    }, 50);
     return () => window.clearTimeout(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only re-autoplay when URL changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [streamUrl]);
 
-  // Capture one video frame as list poster once we can paint a frame
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !streamUrl || !torrent) return;
-    if (torrent.posterUrl) return; // already have one
+    if (torrent.posterUrl) return;
 
     let captured = false;
     const capture = () => {
@@ -219,12 +197,8 @@ export function PlayerPage() {
     };
 
     const onReady = () => {
-      // Seek a few seconds in for a more interesting frame
       try {
-        const t = Math.min(
-          Math.max((video.duration || 60) * 0.03, 1),
-          30,
-        );
+        const t = Math.min(Math.max((video.duration || 60) * 0.03, 1), 30);
         if (Number.isFinite(t) && t > 0) {
           video.addEventListener("seeked", onSeeked);
           video.currentTime = t;
@@ -241,7 +215,13 @@ export function PlayerPage() {
       video.removeEventListener("loadeddata", onReady);
       video.removeEventListener("seeked", onSeeked);
     };
-  }, [streamUrl, torrent?.infoHash, torrent?.torrentKey, torrent?.posterUrl, setTorrentPoster]);
+  }, [
+    streamUrl,
+    torrent?.infoHash,
+    torrent?.torrentKey,
+    torrent?.posterUrl,
+    setTorrentPoster,
+  ]);
 
   const togglePlay = useCallback(() => {
     const video = videoRef.current;
@@ -272,25 +252,11 @@ export function PlayerPage() {
     if (Number.isFinite(video.duration)) setDuration(video.duration);
   };
 
-  const onSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const video = videoRef.current;
-    if (!video || !duration) return;
-    const next = (Number(e.target.value) / 100) * duration;
-    video.currentTime = next;
-    setCurrentTime(next);
-  };
-
-  const onVolume = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const next = Number(e.target.value) / 100;
-    setVolume(next);
-    if (videoRef.current) videoRef.current.volume = next;
-  };
-
   const scrubPct = duration > 0 ? (currentTime / duration) * 100 : 0;
 
   return (
-    <div className="player">
-      <div className="player-stage">
+    <Box className="player-root">
+      <Box className="player-stage">
         {streamUrl ? (
           <video
             ref={videoRef}
@@ -301,7 +267,6 @@ export function PlayerPage() {
             onTimeUpdate={onTimeUpdate}
             onLoadedMetadata={onTimeUpdate}
             onCanPlay={() => {
-              // Media has enough data to start — clear "starting" status
               setStatus((s) =>
                 s.startsWith("Starting") || s.startsWith("Streaming")
                   ? ""
@@ -323,7 +288,7 @@ export function PlayerPage() {
                 code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED
                   ? "Format not supported or stream not ready yet"
                   : code === MediaError.MEDIA_ERR_NETWORK
-                    ? "Network error loading stream (is the engine running?)"
+                    ? "Network error loading stream"
                     : "Playback error — wait for more data or try again";
               setStatus(msg);
               setPlaying(false);
@@ -331,87 +296,116 @@ export function PlayerPage() {
             onClick={togglePlay}
           />
         ) : (
-          <div className="placeholder">
-            <h2>{torrent?.name ?? "No media selected"}</h2>
-            <p>{status || "Player — stream URL wires via stream_start"}</p>
-            <button
-              type="button"
-              className="btn ghost"
-              style={{ marginTop: 12 }}
+          <Stack align="center" gap="sm" p="xl">
+            <Text size="lg" c="gray.3">
+              {torrent?.name ?? "No media selected"}
+            </Text>
+            <Text size="sm" c="dimmed">
+              {status || "Player"}
+            </Text>
+            <Button
+              variant="light"
+              mt="sm"
               onClick={() => navigate("torrent-list")}
             >
               Back to list
-            </button>
-          </div>
+            </Button>
+          </Stack>
         )}
-      </div>
-      <div className="player-controls">
-        <div className="scrubber">
-          <input
-            type="range"
-            className="scrubber-input"
-            min={0}
-            max={100}
-            step={0.1}
-            value={scrubPct}
-            onChange={onSeek}
-            disabled={!streamUrl || !duration}
-            aria-label="Seek"
-          />
-        </div>
-        <div className="control-row">
-          <div className="control-left">
-            <button
-              type="button"
-              className="icon-btn"
-              title={playing ? "Pause" : "Play"}
-              aria-label={playing ? "Pause" : "Play"}
-              onClick={togglePlay}
-              disabled={!streamUrl}
-            >
-              {playing ? <PauseIcon /> : <PlayIcon />}
-            </button>
-            <button
-              type="button"
-              className="icon-btn"
-              title="Volume"
-              aria-label="Volume"
-              disabled={!streamUrl}
-            >
-              <VolumeIcon />
-            </button>
-            <input
-              type="range"
-              className="volume-slider"
+      </Box>
+
+      <Box
+        px="md"
+        py="sm"
+        style={{
+          flexShrink: 0,
+          background: "rgba(26, 27, 30, 0.95)",
+          borderTop: "1px solid var(--mantine-color-dark-5)",
+        }}
+      >
+        <Slider
+          value={scrubPct}
+          onChange={(v) => {
+            const video = videoRef.current;
+            if (!video || !duration) return;
+            const next = (v / 100) * duration;
+            video.currentTime = next;
+            setCurrentTime(next);
+          }}
+          min={0}
+          max={100}
+          step={0.1}
+          disabled={!streamUrl || !duration}
+          size="xs"
+          color="gray.2"
+          mb="sm"
+          label={null}
+        />
+
+        <Box
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr auto 1fr",
+            alignItems: "center",
+            gap: 12,
+            minHeight: 36,
+          }}
+        >
+          <Group gap="xs" wrap="nowrap" justify="flex-start">
+            <Tooltip label={playing ? "Pause" : "Play"}>
+              <ActionIcon
+                variant="subtle"
+                color="gray"
+                size="lg"
+                disabled={!streamUrl}
+                onClick={togglePlay}
+                aria-label={playing ? "Pause" : "Play"}
+              >
+                {playing ? (
+                  <IconPlayerPause size={22} />
+                ) : (
+                  <IconPlayerPlay size={22} />
+                )}
+              </ActionIcon>
+            </Tooltip>
+            <IconVolume size={18} style={{ opacity: 0.7 }} />
+            <Slider
+              value={volume * 100}
+              onChange={(v) => {
+                const next = v / 100;
+                setVolume(next);
+                if (videoRef.current) videoRef.current.volume = next;
+              }}
               min={0}
               max={100}
-              value={volume * 100}
-              onChange={onVolume}
+              w={80}
+              size="xs"
+              color="gray.2"
               disabled={!streamUrl}
-              aria-label="Volume"
+              label={null}
             />
-          </div>
+          </Group>
 
-          <span className="time">
+          <Text size="sm" c="dimmed" ff="monospace" style={{ whiteSpace: "nowrap" }}>
             {formatTime(currentTime)} / {formatTime(duration)}
-          </span>
+          </Text>
 
-          <div className="control-right">
+          <Group gap="sm" wrap="nowrap" justify="flex-end">
             {status ? (
-              <span className="stream-status" title={status}>
+              <Text size="xs" c="dimmed" lineClamp={1} maw={160} title={status}>
                 {status}
-              </span>
+              </Text>
             ) : null}
-            <button
-              type="button"
-              className="btn ghost"
+            <Button
+              variant="subtle"
+              size="compact-sm"
               onClick={() => navigate("torrent-list")}
             >
               Back
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
+            </Button>
+          </Group>
+        </Box>
+      </Box>
+    </Box>
   );
 }
