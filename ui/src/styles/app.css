@@ -1,6 +1,7 @@
 /*
  * App shell only — layout for the Tauri window chrome.
  * Component styling comes from Mantine.
+ * Colors follow Mantine light/dark scheme via CSS variables.
  */
 
 html,
@@ -9,8 +10,8 @@ body,
   height: 100%;
   margin: 0;
   overflow: hidden;
-  background: #1a1b1e;
-  color: #c1c2c5;
+  background: var(--mantine-color-body);
+  color: var(--mantine-color-text);
   user-select: none;
   -webkit-user-select: none;
 }
@@ -21,10 +22,19 @@ body,
   box-sizing: border-box;
 }
 
-/* macOS titlebar drag region */
+/* macOS titlebar drag region + theme-aware chrome */
 .app-header {
   -webkit-app-region: drag;
   app-region: drag;
+  background: var(--mantine-color-body);
+  border-bottom: 1px solid var(--mantine-color-default-border);
+  /* Ensure Mantine padding utilities never collapse the traffic-light gutter */
+  box-sizing: border-box;
+}
+
+.app-header.is-player {
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.55), transparent);
+  border-bottom: none;
 }
 
 .app-header button,
