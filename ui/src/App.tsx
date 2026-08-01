@@ -37,18 +37,44 @@ function ViewRouter() {
   }
 }
 
+/** Tracker/DNS noise that should not become toasts. */
+function isNoisyTorrentMessage(message: string): boolean {
+  const m = message.toLowerCase();
+  return (
+    m.includes("enotfound") ||
+    m.includes("getaddrinfo") ||
+    m.includes("eai_again") ||
+    m.includes("etimedout") ||
+    m.includes("econnrefused") ||
+    m.includes("unsupported tracker") ||
+    m.includes("no nodes to query") ||
+    m.includes("tracker") && (m.includes("announce") || m.includes("udp://") || m.includes("wss://"))
+  );
+}
+
 function useStatusNotifications() {
   const statusMessage = useAppStore((s) => s.statusMessage);
   const setStatusMessage = useAppStore((s) => s.setStatusMessage);
 
   useEffect(() => {
     if (!statusMessage) return;
+    // Consume the message either way so it does not re-fire
+    const msg = statusMessage;
+    setStatusMessage(null);
+    if (isNoisyTorrentMessage(msg)) return;
+    // Skip low-value lifecycle chatter
+    if (
+      msg === "Shell ready" ||
+      msg === "Engine ready" ||
+      msg.startsWith("Metadata:")
+    ) {
+      return;
+    }
     notifications.show({
-      message: statusMessage,
+      message: msg,
       color: "dark",
       autoClose: 3500,
     });
-    setStatusMessage(null);
   }, [statusMessage, setStatusMessage]);
 }
 
@@ -202,6 +228,13 @@ function useShellBridge() {
             typeof payload.message === "string"
               ? payload.message
               : "Torrent error";
+          const level =
+            typeof payload.level === "string" ? payload.level : "error";
+          // Tracker DNS / warning noise — log only, do not toast
+          if (level === "warning" || isNoisyTorrentMessage(msg)) {
+            console.debug("[torrent]", level, msg);
+            return;
+          }
           setStatusMessage(msg);
         }),
       ]);
